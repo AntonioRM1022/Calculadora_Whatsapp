@@ -35,8 +35,29 @@ Zapato de [Categoria] precio de oferta $[PrecioFinal]
 
 - **Flutter** (Material Design 3)
 - **Dart** (`>=3.2.0 <4.0.0`)
+- [`google_generative_ai`](https://pub.dev/packages/google_generative_ai): Extraccion y estructuracion de datos en lenguaje natural mediante el modelo Gemini.
+- [`speech_to_text`](https://pub.dev/packages/speech_to_text): Captura de audio del microfono y transcripcion a texto en tiempo real.
+- [`flutter_dotenv`](https://pub.dev/packages/flutter_dotenv): Gestion de variables de entorno y proteccion de claves de API.
 - [`image_picker`](https://pub.dev/packages/image_picker): Seleccion de imagenes desde la galeria del dispositivo.
 - [`share_plus`](https://pub.dev/packages/share_plus): Integracion con el selector nativo para compartir archivos e imagenes (`Share.shareXFiles`).
+
+## Configuracion de Variables de Entorno
+
+Por seguridad y buenas practicas, las credenciales de API no estan incluidas en el repositorio.
+
+1. Copiar el archivo de plantilla `.env.example` como `.env`:
+
+```bash
+cp .env.example .env
+```
+
+2. Abrir `.env` y configurar la clave de Google Gemini:
+
+```env
+GEMINI_API_KEY=tu_api_key_aqui
+```
+
+El archivo `.env` se encuentra registrado en `.gitignore` para prevenir su exposicion accidental en Git.
 
 ## Estructura del Proyecto
 

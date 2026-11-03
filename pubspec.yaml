@@ -11,6 +11,9 @@ dependencies:
     sdk: flutter
   image_picker: ^1.1.2
   share_plus: ^10.0.2
+  speech_to_text: ^7.0.0
+  google_generative_ai: ^0.4.6
+  flutter_dotenv: ^5.2.1
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +24,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/app_icon.png
+    - .env
