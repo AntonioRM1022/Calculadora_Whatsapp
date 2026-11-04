@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
@@ -98,7 +99,8 @@ class OfferCalculatorScreen extends StatefulWidget {
   State<OfferCalculatorScreen> createState() => _OfferCalculatorScreenState();
 }
 
-class _OfferCalculatorScreenState extends State<OfferCalculatorScreen> {
+class _OfferCalculatorScreenState extends State<OfferCalculatorScreen>
+    with SingleTickerProviderStateMixin {
   String get _geminiApiKey {
     final fromDotenv = dotenv.env['GEMINI_API_KEY'];
     if (fromDotenv != null && fromDotenv.trim().isNotEmpty) {
@@ -123,14 +125,14 @@ Lee el texto dictado por el usuario y devuelve ÚNICAMENTE un JSON válido con e
   "tallas": ["22", "23", "24", "25"]
 }
 Reglas:
-- "costo": número del precio de costo (ej. si dice "cuestan 500" o "me costó 400", pon 500 o 400).
+- "costo": número del precio de costo (ej. si dice "cuesta 800" o "me costó 500", pon 800 o 500). NUNCA confundas los números de las tallas (ej. "corrida del 20 al 25") con el costo.
 - "categoria": únicamente 'dama', 'caballero' o 'niño'.
-- "extra": ganancia adicional mencionada (10, 15, 20 o 30). Si no menciona ganancia extra, pon 0.
+- "extra": número de ganancia adicional si la menciona (ej. 10, 20, 25, 30, 40, 50, etc.). Si dice "no quiero ganar ganancias", "sin ganancia", o no menciona ganancia, pon 0.
 - "tipo": 'calzado' (si habla de tenis, zapatos, botas, sandalias, huaraches, corrida numérica) o 'prenda' (si habla de ropa, suéter, blusa, pantalón, camisa, playera, vestido).
 - "nombre_producto": si menciona marca o artículo específico (ej. "Tenis Pirma", "Suéter", "Blusa"), ponlo con inicial mayúscula; si no, pon "".
-- "tallas": lista de strings.
-  * Para calzado: tallas individuales enteras ["22", "23", "24", "25"].
-  * Para prendas: usa ÚNICAMENTE las siglas ["CH", "M", "G", "XG", "Unitalla"] si dice chica, mediana, grande, extra grande o unitalla. Si dice "de chica a grande", pon ["CH", "M", "G"].
+- "tallas": lista de strings de tallas.
+  * Para calzado: tallas individuales enteras numéricas (ej. ["20", "21", "22", "23", "24", "25"]).
+  * Para prendas: usa ÚNICAMENTE ["CH", "M", "G", "XG", "Unitalla"] si dice chica, mediana, grande, extra grande o unitalla. Si dice "de chica a grande", pon ["CH", "M", "G"].
 ''';
 
   double _costPrice = 25.00;
@@ -143,11 +145,22 @@ Reglas:
 
   // Variables para dictado por voz e IA
   late final stt.SpeechToText _speech;
+  late final AnimationController _pulseController;
+  bool _isAutoClosing = false;
   bool _speechAvailable = false;
   bool _isListening = false;
   bool _isProcessingAI = false;
   String _spokenText = '';
   bool _alreadyProcessedCurrentSpeech = false;
+  double _soundLevel = 0.0;
+  double _spasmIntensity = 0.0;
+
+  // Bloqueo progresivo durante la sesión de dictado para evitar sobreescritura
+  bool _sessionCostLocked = false;
+  bool _sessionExtraLocked = false;
+  bool _sessionTypeLocked = false;
+  bool _sessionCategoryLocked = false;
+  bool _sessionSizesLocked = false;
 
   // Paso activo:
   // 1 = Costo, 2 = Ganancia extra, 3 = Producto, 4 = Categoría, 5 = Tallas, 6 = Foto, 7 = Completado
@@ -162,12 +175,16 @@ Reglas:
 
   late final TextEditingController _costController;
   late final FocusNode _costFocusNode;
+  late final TextEditingController _customExtraController;
+  late final FocusNode _customExtraFocusNode;
   late final ScrollController _scrollController;
   final ImagePicker _picker = ImagePicker();
 
-  final List<int> _extraOptions = [10, 15, 20, 30];
+  final List<int> _extraOptions = [10, 20, 30, 40, 50];
 
   final List<String> _damaFootwearSizes = [
+    '20',
+    '21',
     '22',
     '23',
     '24',
@@ -177,6 +194,8 @@ Reglas:
   ];
 
   final List<String> _caballeroFootwearSizes = [
+    '20',
+    '21',
     '22',
     '23',
     '24',
@@ -231,9 +250,15 @@ Reglas:
       text: _costPrice.toStringAsFixed(2),
     );
     _costFocusNode = FocusNode();
+    _customExtraController = TextEditingController();
+    _customExtraFocusNode = FocusNode();
     _scrollController = ScrollController();
     _speech = stt.SpeechToText();
     _initSpeech();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3200),
+    )..repeat();
   }
 
   Future<void> _initSpeech() async {
@@ -244,6 +269,8 @@ Reglas:
             if (mounted && _isListening) {
               setState(() {
                 _isListening = false;
+                _soundLevel = 0.0;
+                _spasmIntensity = 0.0;
               });
               if (_spokenText.trim().isNotEmpty &&
                   !_alreadyProcessedCurrentSpeech) {
@@ -257,6 +284,8 @@ Reglas:
           if (!mounted) return;
           setState(() {
             _isListening = false;
+            _soundLevel = 0.0;
+            _spasmIntensity = 0.0;
           });
         },
       );
@@ -268,8 +297,11 @@ Reglas:
   @override
   void dispose() {
     _speech.stop();
+    _pulseController.dispose();
     _costController.dispose();
     _costFocusNode.dispose();
+    _customExtraController.dispose();
+    _customExtraFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -284,6 +316,8 @@ Reglas:
       await _speech.stop();
       setState(() {
         _isListening = false;
+        _soundLevel = 0.0;
+        _spasmIntensity = 0.0;
       });
       if (_spokenText.trim().isNotEmpty && !_alreadyProcessedCurrentSpeech) {
         _alreadyProcessedCurrentSpeech = true;
@@ -312,35 +346,45 @@ Reglas:
       _spokenText = '';
       _isListening = true;
       _alreadyProcessedCurrentSpeech = false;
+      _soundLevel = 0.0;
+      _spasmIntensity = 0.0;
+      // Reiniciar bloqueos de sesión para esta nueva dictada
+      _sessionCostLocked = false;
+      _sessionExtraLocked = false;
+      _sessionTypeLocked = false;
+      _sessionCategoryLocked = false;
+      _sessionSizesLocked = false;
     });
 
     await _speech.listen(
       listenOptions: stt.SpeechListenOptions(
         localeId: 'es_MX',
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 4),
-        listenMode: stt.ListenMode.confirmation,
+        listenFor: const Duration(minutes: 2),
+        pauseFor: const Duration(seconds: 10),
+        listenMode: stt.ListenMode.dictation,
         cancelOnError: false,
         partialResults: true,
       ),
+      onSoundLevelChange: (level) {
+        if (!mounted) return;
+        // Normalizar volumen de la voz en dB (-2 a +10 aprox)
+        final double normalized = ((level + 2.0) / 10.0).clamp(0.0, 1.0);
+        _soundLevel = normalized;
+        if (normalized > 0.18) {
+          // Espasmo sutil y controlado, no desmedido
+          _spasmIntensity = math.min(0.45, _spasmIntensity + normalized * 0.35);
+        }
+      },
       onResult: (result) {
         if (!mounted) return;
         setState(() {
           _spokenText = result.recognizedWords;
+          // Pequeño espasmo sutil al detectar palabras en vivo
+          _spasmIntensity = 0.45;
         });
 
-        // ACTUALIZACIÓN EN TIEMPO REAL MIENTRAS EL USUARIO DICTA
+        // ACTUALIZACIÓN EN TIEMPO REAL CON BLOQUEO PROGRESIVO
         _applyRealtimeExtraction(result.recognizedWords);
-
-        if (result.finalResult &&
-            _spokenText.trim().isNotEmpty &&
-            !_alreadyProcessedCurrentSpeech) {
-          _alreadyProcessedCurrentSpeech = true;
-          setState(() {
-            _isListening = false;
-          });
-          _processTextWithGemini(_spokenText);
-        }
       },
     );
   }
@@ -355,57 +399,106 @@ Reglas:
         ? rawCost.toDouble()
         : double.tryParse(rawCost?.toString() ?? '');
 
-    final String category = localData['categoria']?.toString() ?? '';
-    final String type = localData['tipo']?.toString() ?? '';
+    final String? category = localData['categoria']?.toString();
+    final String? type = localData['tipo']?.toString();
     final String name = localData['nombre_producto']?.toString() ?? '';
     final List<String> sizes =
         (localData['tallas'] as List?)?.map((e) => e.toString()).toList() ??
             [];
-    final int extra = (localData['extra'] as num?)?.round() ?? 0;
+    final int? extra = localData['extra'] as int?;
+    final bool noExtra = localData['no_extra'] == true;
 
     setState(() {
+      // 1. Costo: Se bloquea en la sesión y NUNCA se sobreescribe con tallas o ruidos
       if (parsedCost != null && parsedCost > 0) {
-        _costPrice = parsedCost;
-        _costController.text = _costPrice.toStringAsFixed(2);
-        _costCompleted = true;
+        if (!_sessionCostLocked || _costPrice <= 0) {
+          _costPrice = parsedCost;
+          _costController.text = _costPrice.toStringAsFixed(2);
+          _costCompleted = true;
+          _sessionCostLocked = true; // Bloqueado contra sobreescritura
+        }
       }
 
-      if (_extraOptions.contains(extra)) {
-        _selectedExtra = extra;
+      // 2. Extra o "Sin Ganancia": Se bloquea en la sesión
+      if (noExtra) {
+        _selectedExtra = null;
+        _customExtraController.clear();
         _extraCompleted = true;
+        _sessionExtraLocked = true; // Bloqueado explícitamente sin ganancia
+      } else if (extra != null && extra > 0) {
+        if (!_sessionExtraLocked) {
+          _selectedExtra = extra;
+          if (!_extraOptions.contains(extra)) {
+            _customExtraController.text = extra.toString();
+          } else {
+            _customExtraController.clear();
+          }
+          _extraCompleted = true;
+          _sessionExtraLocked = true; // Bloqueado
+        }
       }
 
-      if (type == 'prenda') {
-        _selectedProductType = 'Prenda';
-        _productTypeCompleted = true;
-      } else if (type == 'calzado') {
-        _selectedProductType = 'Calzado';
-        _productTypeCompleted = true;
+      // 3. Tipo de producto
+      if (type != null && type.isNotEmpty) {
+        if (!_sessionTypeLocked) {
+          _selectedProductType = type == 'prenda' ? 'Prenda' : 'Calzado';
+          _productTypeCompleted = true;
+          _sessionTypeLocked = true; // Bloqueado
+        }
       }
 
       if (name.isNotEmpty) {
         _customProductName = name;
       }
 
-      if (category == 'caballero') {
-        _selectedCategory = 'Caballero';
-        _categoryCompleted = true;
-      } else if (category == 'niño') {
-        _selectedCategory = 'Niño';
-        _categoryCompleted = true;
-      } else if (category == 'dama') {
-        _selectedCategory = 'Dama';
-        _categoryCompleted = true;
+      // 4. Categoría
+      if (category != null && category.isNotEmpty) {
+        if (!_sessionCategoryLocked) {
+          if (category == 'caballero') _selectedCategory = 'Caballero';
+          if (category == 'niño') _selectedCategory = 'Niño';
+          if (category == 'dama') _selectedCategory = 'Dama';
+          _categoryCompleted = true;
+          _sessionCategoryLocked = true; // Bloqueado
+        }
       }
 
+      // 5. Tallas
       if (sizes.isNotEmpty) {
         _selectedSizes
           ..clear()
           ..addAll(sizes);
         _rangeFilled = sizes.length > 1;
         _sizeCompleted = true;
+        _sessionSizesLocked = true;
       }
     });
+
+    _checkAutoCloseIfComplete();
+  }
+
+  void _checkAutoCloseIfComplete() {
+    if (_isAutoClosing) return;
+    final bool hasCost = _sessionCostLocked && _costPrice > 0;
+    final bool hasType = _selectedProductType != null;
+    final bool hasCat = _selectedCategory != null;
+    final bool hasSizes = _selectedSizes.isNotEmpty;
+
+    // Cuando se tienen los 4 datos esenciales (Costo, Tipo, Categoría y Tallas) se cierra solo
+    if (hasCost && hasType && hasCat && hasSizes) {
+      _isAutoClosing = true;
+      Future.delayed(const Duration(milliseconds: 1000), () async {
+        if (!mounted) return;
+        await _speech.stop();
+        setState(() {
+          _isListening = false;
+        });
+        if (_spokenText.trim().isNotEmpty && !_alreadyProcessedCurrentSpeech) {
+          _alreadyProcessedCurrentSpeech = true;
+          await _processTextWithGemini(_spokenText);
+        }
+        _isAutoClosing = false;
+      });
+    }
   }
 
   Future<void> _processTextWithGemini(String spokenText) async {
@@ -477,7 +570,7 @@ Reglas:
     final lower = text.toLowerCase();
 
     // 1. Categoría
-    String categoria = 'dama';
+    String? categoria;
     if (lower.contains('caballero') ||
         lower.contains('hombre') ||
         lower.contains('varón') ||
@@ -497,7 +590,7 @@ Reglas:
     }
 
     // 2. Tipo de producto y nombre específico
-    String tipo = 'calzado';
+    String? tipo;
     if (lower.contains('prenda') ||
         lower.contains('ropa') ||
         lower.contains('suéter') ||
@@ -512,6 +605,16 @@ Reglas:
         lower.contains('sudadera') ||
         lower.contains('falda')) {
       tipo = 'prenda';
+    } else if (lower.contains('zapato') ||
+        lower.contains('tenis') ||
+        lower.contains('tennis') ||
+        lower.contains('bota') ||
+        lower.contains('sandalia') ||
+        lower.contains('huarache') ||
+        lower.contains('tacon') ||
+        lower.contains('tacón') ||
+        lower.contains('calzado')) {
+      tipo = 'calzado';
     }
 
     String nombreProducto = '';
@@ -561,11 +664,12 @@ Reglas:
       }
     }
 
-    // 3. Tallas de calzado o prenda
-    final List<String> tallas = [];
+    // 3. Tallas de calzado o prenda y recopilación de números para NO confundir con el precio
+    final List<String> tallasCalzado = [];
+    final List<String> tallasPrenda = [];
     final Set<int> sizeNumbersUsedInText = {};
 
-    // Calzado numérico (ej. "corrida del 22 al 25", "del 22 al 26")
+    // Calzado numérico (ej. "corrida del 20 al 25", "del 20 al 25", "del 22 al 26")
     final rangeMatch = RegExp(
       r'(?:corrida\s+)?(?:del?|de\s+la|tallas?\s+de\s+la|tallas?\s+del?|tallas?)\s*(\d{1,2})(?:\.\d+)?\s*(?:al?|hasta\s+el|hasta\s+la)\s*(\d{1,2})(?:\.\d+)?',
     ).firstMatch(lower);
@@ -573,15 +677,25 @@ Reglas:
     if (rangeMatch != null) {
       final int start = int.parse(rangeMatch.group(1)!);
       final int end = int.parse(rangeMatch.group(2)!);
-      sizeNumbersUsedInText.add(start);
-      sizeNumbersUsedInText.add(end);
       final int minSize = start < end ? start : end;
       final int maxSize = start > end ? start : end;
-      if (minSize >= 2 && maxSize <= 32) {
-        final int step = (tipo == 'prenda' && maxSize <= 16) ? 2 : 1;
-        for (int s = minSize; s <= maxSize; s += step) {
-          tallas.add(s.toString());
+      for (int s = minSize; s <= maxSize; s++) {
+        sizeNumbersUsedInText.add(s);
+      }
+      if (minSize >= 10 && maxSize <= 34) {
+        for (int s = minSize; s <= maxSize; s++) {
+          tallasCalzado.add(s.toString());
         }
+      }
+    }
+
+    // Tallas explícitas individuales (ej. "talla 24", "tallas 22 y 25")
+    final explicitSizes = RegExp(r'\btallas?\s+(\d{1,2})\b').allMatches(lower);
+    for (final m in explicitSizes) {
+      final s = int.parse(m.group(1)!);
+      sizeNumbersUsedInText.add(s);
+      if (!tallasCalzado.contains(s.toString())) {
+        tallasCalzado.add(s.toString());
       }
     }
 
@@ -592,63 +706,80 @@ Reglas:
     for (final m in excludeMatch) {
       final String excluded = m.group(1)!;
       sizeNumbersUsedInText.add(int.parse(excluded));
-      tallas.remove(excluded);
+      tallasCalzado.remove(excluded);
     }
 
     // Tallas de prenda (CH, M, G, XG, Unitalla)
     if (lower.contains('unitalla')) {
-      tallas
-        ..clear()
-        ..add('Unitalla');
-    } else if (tipo == 'prenda' || tallas.isEmpty) {
+      tallasPrenda.add('Unitalla');
+    } else {
       if (RegExp(r'(?:de\s+)?chica\s+(?:a|al?|hasta)\s+grande').hasMatch(lower)) {
-        tallas.addAll(['CH', 'M', 'G']);
+        tallasPrenda.addAll(['CH', 'M', 'G']);
       } else if (RegExp(r'(?:de\s+)?chica\s+(?:a|al?|hasta)\s+extra\s*grande').hasMatch(lower)) {
-        tallas.addAll(['CH', 'M', 'G', 'XG']);
+        tallasPrenda.addAll(['CH', 'M', 'G', 'XG']);
       } else if (RegExp(r'(?:de\s+)?mediana\s+(?:a|al?|hasta)\s+grande').hasMatch(lower)) {
-        tallas.addAll(['M', 'G']);
+        tallasPrenda.addAll(['M', 'G']);
       } else {
         if (RegExp(r'\b(chica|chicas|ch)\b').hasMatch(lower)) {
-          if (!tallas.contains('CH')) tallas.add('CH');
+          if (!tallasPrenda.contains('CH')) tallasPrenda.add('CH');
         }
         if (RegExp(r'\b(mediana|medianas|m)\b').hasMatch(lower)) {
-          if (!tallas.contains('M')) tallas.add('M');
+          if (!tallasPrenda.contains('M')) tallasPrenda.add('M');
         }
         if (RegExp(r'\b(grande|grandes|g)\b').hasMatch(lower)) {
-          if (!tallas.contains('G')) tallas.add('G');
+          if (!tallasPrenda.contains('G')) tallasPrenda.add('G');
         }
         if (RegExp(r'\b(extra\s*grande|extra\s*grandes|xg|xl)\b').hasMatch(lower)) {
-          if (!tallas.contains('XG')) tallas.add('XG');
+          if (!tallasPrenda.contains('XG')) tallasPrenda.add('XG');
         }
       }
     }
 
-    // 4. Ganancia extra
-    int extra = 0;
-    final extraMatch = RegExp(
-      r'(?:ganar(?:le)?|ganancia|extra|sumar(?:le)?|más|mas)\s*(?:de\s*)?\$?\s*(10|15|20|30)\b',
-    ).firstMatch(lower);
-    if (extraMatch != null) {
-      extra = int.parse(extraMatch.group(1)!);
-      sizeNumbersUsedInText.add(extra);
+    // Si el tipo es prenda, preferir tallas textiles; si es calzado, preferir números
+    List<String> tallasFinales = [];
+    final effectiveType = tipo ?? _selectedProductType?.toLowerCase() ?? 'calzado';
+    if (effectiveType == 'prenda') {
+      tallasFinales = tallasPrenda.isNotEmpty ? tallasPrenda : tallasCalzado;
+    } else {
+      tallasFinales = tallasCalzado.isNotEmpty ? tallasCalzado : tallasPrenda;
     }
 
-    // 5. Costo
-    double costo = _costPrice;
+    // 4. Ganancia extra o "Sin ganancia"
+    int? extra;
+    bool noExtraSpecified = false;
+    if (RegExp(r'(?:no\s+quiero\s+(?:ganar|ganancia|ganancias)|sin\s+ganancia|cero\s+ganancia|nada\s+de\s+ganancia|sin\s+extra|no\s+le\s+ganes|sin\s+ganar)').hasMatch(lower)) {
+      extra = 0;
+      noExtraSpecified = true;
+    } else {
+      final extraMatch = RegExp(
+        r'(?:ganar(?:le)?|ganancia|extra|sumar(?:le)?|más|mas)\s*(?:de\s*)?\$?\s*(\d{1,4})\b',
+      ).firstMatch(lower);
+      if (extraMatch != null) {
+        extra = int.parse(extraMatch.group(1)!);
+        sizeNumbersUsedInText.add(extra);
+      }
+    }
+
+    // 5. Costo (Protegido para que NUNCA tome números de tallas)
+    double? costo;
     final costoExplicitMatch = RegExp(
-      r'(?:costó|costo|cuestan|cuesta|valen|vale|compré\s+en|compre\s+en|precio|a)\s*(?:de\s*)?\$?\s*(\d+(?:[.,]\d+)?)',
+      r'(?:costó|costo|cuestan|cuesta|valen|vale|compré\s+en|compre\s+en|precio)\s*(?:es\s+de\s*|del?\s+.*?\s+cuesta\s*|de\s*)?\$?\s*(\d+(?:[.,]\d+)?)',
     ).firstMatch(lower);
 
     if (costoExplicitMatch != null) {
-      costo = double.tryParse(
-            costoExplicitMatch.group(1)!.replaceAll(',', '.'),
-          ) ??
-          costo;
+      final val = double.tryParse(
+        costoExplicitMatch.group(1)!.replaceAll(',', '.'),
+      );
+      if (val != null && val > 0) {
+        costo = val;
+      }
     } else {
-      final allNums = RegExp(r'\d+(?:[.,]\d+)?')
+      // Solo buscar un número suelto si es mayor que 35 (para que NUNCA sea talla)
+      // y que NO pertenezca a las tallas ni al extra
+      final allNums = RegExp(r'\b\d+(?:[.,]\d+)?\b')
           .allMatches(lower)
           .map((m) => double.tryParse(m.group(0)!.replaceAll(',', '.')) ?? 0.0)
-          .where((n) => !sizeNumbersUsedInText.contains(n.round()))
+          .where((n) => n > 35 && !sizeNumbersUsedInText.contains(n.round()))
           .toList();
       if (allNums.isNotEmpty) {
         costo = allNums.first;
@@ -659,9 +790,10 @@ Reglas:
       'costo': costo,
       'categoria': categoria,
       'extra': extra,
+      'no_extra': noExtraSpecified,
       'tipo': tipo,
       'nombre_producto': nombreProducto,
-      'tallas': tallas,
+      'tallas': tallasFinales,
     };
   }
 
@@ -672,13 +804,13 @@ Reglas:
 
   void _applyExtractedData(Map<String, dynamic> data) {
     final dynamic rawCost = data['costo'];
-    final double parsedCost = rawCost is num
+    final double? parsedCost = rawCost is num
         ? rawCost.toDouble()
-        : (double.tryParse(rawCost?.toString() ?? '') ?? _costPrice);
+        : double.tryParse(rawCost?.toString() ?? '');
 
     final String rawCategory =
         (data['categoria']?.toString() ?? '').toLowerCase().trim();
-    String mappedCategory = 'Dama';
+    String? mappedCategory;
     if (rawCategory.contains('caballero')) {
       mappedCategory = 'Caballero';
     } else if (rawCategory.contains('niñ') || rawCategory.contains('nin')) {
@@ -688,14 +820,15 @@ Reglas:
     }
 
     final dynamic rawExtra = data['extra'];
-    final int parsedExtra = rawExtra is num
+    final int? parsedExtra = rawExtra is num
         ? rawExtra.round()
-        : (int.tryParse(rawExtra?.toString() ?? '0') ?? 0);
+        : int.tryParse(rawExtra?.toString() ?? '');
 
     final String rawTipo =
-        (data['tipo']?.toString() ?? 'calzado').toLowerCase().trim();
-    final String productType =
-        rawTipo.contains('prenda') ? 'Prenda' : 'Calzado';
+        (data['tipo']?.toString() ?? '').toLowerCase().trim();
+    final String? productType = rawTipo.contains('prenda')
+        ? 'Prenda'
+        : (rawTipo.contains('calzado') ? 'Calzado' : null);
 
     final String customName =
         (data['nombre_producto']?.toString() ?? '').trim();
@@ -713,36 +846,58 @@ Reglas:
     setState(() {
       _isProcessingAI = false;
 
-      // 1. Costo
-      _costPrice = parsedCost;
-      _costController.text = _costPrice.toStringAsFixed(2);
-      _costCompleted = true;
+      // 1. Costo: Si ya estaba bloqueado en la sesión, se preserva intacto
+      if (_sessionCostLocked && _costPrice > 0) {
+        // Se mantiene
+      } else if (parsedCost != null && parsedCost > 0) {
+        _costPrice = parsedCost;
+        _costController.text = _costPrice.toStringAsFixed(2);
+        _costCompleted = true;
+      }
 
-      // 2. Ganancia extra
-      if (_extraOptions.contains(parsedExtra)) {
+      // 2. Ganancia extra: Respetar si fue bloqueada sin ganancia o con ganancia
+      if (_sessionExtraLocked) {
+        // Se mantiene
+      } else if (parsedExtra != null && parsedExtra > 0) {
         _selectedExtra = parsedExtra;
+        if (!_extraOptions.contains(parsedExtra)) {
+          _customExtraController.text = parsedExtra.toString();
+        } else {
+          _customExtraController.clear();
+        }
+        _extraCompleted = true;
       } else {
         _selectedExtra = null;
+        _customExtraController.clear();
+        _extraCompleted = true;
       }
-      _extraCompleted = true;
 
       // 3. Producto
-      _selectedProductType = productType;
-      _customProductName = customName.isNotEmpty ? customName : null;
-      _productTypeCompleted = true;
+      if (_sessionTypeLocked && _selectedProductType != null) {
+        if (customName.isNotEmpty) _customProductName = customName;
+      } else if (productType != null) {
+        _selectedProductType = productType;
+        _customProductName = customName.isNotEmpty ? customName : null;
+        _productTypeCompleted = true;
+      }
 
       // 4. Categoría
-      _selectedCategory = mappedCategory;
-      _categoryCompleted = true;
+      if (_sessionCategoryLocked && _selectedCategory != null) {
+        // Se mantiene
+      } else if (mappedCategory != null) {
+        _selectedCategory = mappedCategory;
+        _categoryCompleted = true;
+      }
 
       // 5. Tallas
-      _selectedSizes.clear();
       if (extractedSizes.isNotEmpty) {
+        _selectedSizes.clear();
         _selectedSizes.addAll(extractedSizes);
         _rangeFilled = extractedSizes.length > 1;
         _sizeCompleted = true;
         _activeStep = 6;
-      } else {
+      } else if (!_sessionSizesLocked) {
+        _selectedSizes.clear();
         _rangeFilled = false;
         _sizeCompleted = false;
         _activeStep = 5;
@@ -851,6 +1006,7 @@ Reglas:
       _costController.clear();
       _costPrice = 0.0;
       _selectedExtra = null;
+      _customExtraController.clear();
       _selectedProductType = null;
       _customProductName = null;
       _selectedCategory = null;
@@ -863,6 +1019,11 @@ Reglas:
       _categoryCompleted = false;
       _sizeCompleted = false;
       _photoCompleted = false;
+      _sessionCostLocked = false;
+      _sessionExtraLocked = false;
+      _sessionTypeLocked = false;
+      _sessionCategoryLocked = false;
+      _sessionSizesLocked = false;
       _activeStep = 1;
     });
 
@@ -897,18 +1058,44 @@ Reglas:
   }
 
   void _toggleExtraOption(int amount) {
+    FocusScope.of(context).unfocus();
     setState(() {
       if (_selectedExtra == amount) {
         _selectedExtra = null;
+        _customExtraController.clear();
       } else {
         _selectedExtra = amount;
+        _customExtraController.clear();
         _extraCompleted = true;
         _activeStep = 3;
       }
     });
   }
 
+  void _onCustomExtraChanged(String value) {
+    final cleanValue = value.trim();
+    final int? parsed = int.tryParse(cleanValue);
+    setState(() {
+      if (parsed != null && parsed > 0) {
+        _selectedExtra = parsed;
+        _extraCompleted = true;
+      } else {
+        _selectedExtra = null;
+      }
+    });
+  }
+
+  void _clearCustomExtra() {
+    _customExtraController.clear();
+    setState(() {
+      if (!_extraOptions.contains(_selectedExtra)) {
+        _selectedExtra = null;
+      }
+    });
+  }
+
   void _completeExtraStep() {
+    FocusScope.of(context).unfocus();
     setState(() {
       _extraCompleted = true;
       _activeStep = 3;
@@ -1058,180 +1245,380 @@ Reglas:
 
   @override
   Widget build(BuildContext context) {
+    final bool isListeningActive = _isListening || _isProcessingAI;
+
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        elevation: 0,
-        toolbarHeight: 48,
-        automaticallyImplyLeading: false,
-        title: const Text(
-          'Calculadora For Status Whatsapp',
-          style: TextStyle(
-            color: Color(0xFF1C1C1E),
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-          ),
+      resizeToAvoidBottomInset: false,
+      backgroundColor: isListeningActive
+          ? const Color(0xFF030D06)
+          : const Color(0xFFFBF9F4),
+      appBar: isListeningActive
+          ? null
+          : AppBar(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.white,
+              elevation: 0,
+              toolbarHeight: 52,
+              automaticallyImplyLeading: false,
+              title: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Calculadora For Status Whatsapp',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Color(0xFF1C1C1E),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildAppBarMicButton(),
+                ],
+              ),
+            ),
+      body: isListeningActive
+          ? _buildVoiceDictationOverlay()
+          : GestureDetector(
+              onTap: () => FocusScope.of(context).unfocus(),
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildCostCard(),
+                    const SizedBox(height: 8),
+                    _buildExtraProfitCard(),
+                    const SizedBox(height: 8),
+                    _buildProductTypeCard(),
+                    const SizedBox(height: 8),
+                    _buildCategoryCard(),
+                    const SizedBox(height: 8),
+                    _buildSizesCard(),
+                    const SizedBox(height: 8),
+                    _buildPhotoCard(),
+                    const SizedBox(height: 10),
+                    _buildFinalPriceCard(),
+                    const SizedBox(height: 12),
+                    _buildShareButton(),
+                    const SizedBox(height: 8),
+                    _buildClearButton(),
+                    const SizedBox(height: 14),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // BOTÓN DE MICRÓFONO COMPACTO EN LA BARRA SUPERIOR (JUNTO A WHATSAPP)
+  // ---------------------------------------------------------------------------
+  Widget _buildAppBarMicButton() {
+    final bool isActive = _isListening || _isProcessingAI;
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: _toggleVoiceDictation,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFF1B873F) : const Color(0xFFE8F5E9),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF25D366)
+                  .withValues(alpha: isActive ? 0.45 : 0.15),
+              blurRadius: isActive ? 10 : 4,
+              spreadRadius: isActive ? 2 : 0,
+            ),
+          ],
         ),
-      ),
-      body: GestureDetector(
-        onTap: () => FocusScope.of(context).unfocus(),
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildVoiceDictationButton(),
-              const SizedBox(height: 10),
-              _buildCostCard(),
-              const SizedBox(height: 8),
-              _buildExtraProfitCard(),
-              const SizedBox(height: 8),
-              _buildProductTypeCard(),
-              const SizedBox(height: 8),
-              _buildCategoryCard(),
-              const SizedBox(height: 8),
-              _buildSizesCard(),
-              const SizedBox(height: 8),
-              _buildPhotoCard(),
-              const SizedBox(height: 10),
-              _buildFinalPriceCard(),
-              const SizedBox(height: 12),
-              _buildShareButton(),
-              const SizedBox(height: 8),
-              _buildClearButton(),
-              const SizedBox(height: 14),
-            ],
-          ),
+        child: Icon(
+          _isListening
+              ? Icons.mic_rounded
+              : _isProcessingAI
+                  ? Icons.hourglass_top_rounded
+                  : Icons.mic_none_rounded,
+          size: 22,
+          color: isActive ? Colors.white : const Color(0xFF1B873F),
         ),
       ),
     );
   }
 
   // ---------------------------------------------------------------------------
-  // BOTÓN DESTACADO DE DICTADO POR VOZ CON IA ("Tocar para dictar")
+  // OVERLAY INMERSIVO EN PANTALLA COMPLETA CON ONDAS ORGÁNICAS (ESTILO NCS)
   // ---------------------------------------------------------------------------
-  Widget _buildVoiceDictationButton() {
-    final Color bgColor = _isListening
-        ? const Color(0xFFDC2626)
-        : _isProcessingAI
-            ? const Color(0xFF2563EB)
-            : const Color(0xFF18181B);
+  Widget _buildVoiceDictationOverlay() {
+    final bool hasCost = _sessionCostLocked && _costPrice > 0;
+    final bool hasTypeAndCat =
+        _selectedProductType != null && _selectedCategory != null;
+    final bool hasSizes = _selectedSizes.isNotEmpty;
+    final bool hasExtra = _sessionExtraLocked || _selectedExtra != null;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: bgColor.withValues(alpha: 0.25),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: _isProcessingAI ? null : _toggleVoiceDictation,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_isProcessingAI)
-                      const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Colors.white,
-                        ),
-                      )
-                    else
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: _isListening
-                              ? Colors.white.withValues(alpha: 0.25)
-                              : const Color(0xFF25D366),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          _isListening
-                              ? Icons.mic_rounded
-                              : Icons.mic_none_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                    const SizedBox(width: 12),
-                    Flexible(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _isListening
-                                ? 'Escuchando y llenando campos...'
-                                : _isProcessingAI
-                                    ? 'Afinando con IA...'
-                                    : 'Tocar para dictar',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
+    final String productCatText =
+        _selectedProductType != null && _selectedCategory != null
+            ? '${_customProductName ?? _selectedProductType!} de $_selectedCategory'
+            : (_selectedProductType != null
+                ? (_customProductName ?? _selectedProductType!)
+                : (_selectedCategory ?? ''));
+
+    return SizedBox.expand(
+      child: Container(
+        color: const Color(0xFF030D06), // Fondo 100% inmersivo sin huecos ni recuadros
+        child: SafeArea(
+              child: Column(
+                children: [
+                  // Encabezado superior con estado y botón X
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 9,
+                              height: 9,
+                              decoration: BoxDecoration(
+                                color: _isAutoClosing
+                                    ? const Color(0xFF00FF7F)
+                                    : const Color(0xFF25D366),
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF00FF7F)
+                                        .withValues(alpha: 0.9),
+                                    blurRadius: 8,
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _isListening
-                                ? 'Ej: "Blusa de dama cuesta 200 tallas chica, mediana y grande"'
-                                : 'Dicta en voz normal: llena los campos en vivo mientras hablas',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.85),
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w500,
+                            const SizedBox(width: 8),
+                            Text(
+                              _isAutoClosing
+                                  ? '¡Todo listo! Completando...'
+                                  : (_isProcessingAI
+                                      ? 'Afinando detalles...'
+                                      : 'Escuchando en vivo...'),
+                              style: const TextStyle(
+                                color: Color(0xFF00FF7F),
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                              ),
                             ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded,
+                              color: Colors.white60, size: 26),
+                          onPressed: () async {
+                            await _speech.stop();
+                            setState(() {
+                              _isListening = false;
+                              _isProcessingAI = false;
+                              _isAutoClosing = false;
+                              _soundLevel = 0.0;
+                              _spasmIntensity = 0.0;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Spacer(flex: 1),
+
+                  // ORBE INMERSIVO DE PLASMA Y ENERGÍA CON ESPASMOS REACTIVOS A LA VOZ
+                  AnimatedBuilder(
+                    animation: _pulseController,
+                    builder: (context, child) {
+                      if (_spasmIntensity > 0.0) {
+                        _spasmIntensity =
+                            math.max(0.0, _spasmIntensity - 0.035);
+                      }
+                      return SizedBox(
+                        width: 280,
+                        height: 280,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CustomPaint(
+                              size: const Size(280, 280),
+                              painter: PlasmaOrbPainter(
+                                animationValue: _pulseController.value,
+                                soundLevel: _soundLevel,
+                                spasmIntensity: _spasmIntensity,
+                                isListening: _isListening,
+                                isComplete: _isAutoClosing,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black.withValues(alpha: 0.28),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF00FF7F).withValues(
+                                      alpha: (_isAutoClosing ? 0.9 : 0.45) +
+                                          _spasmIntensity * 0.4,
+                                    ),
+                                    blurRadius: 18 + _spasmIntensity * 16,
+                                  ),
+                                ],
+                              ),
+                              child: Icon(
+                                _isAutoClosing
+                                    ? Icons.check_circle_rounded
+                                    : Icons.mic_rounded,
+                                size: 52,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                  const Spacer(flex: 1),
+
+                  // Texto dictado en tiempo real sin recuadros blancos rígidos
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      _spokenText.isNotEmpty
+                          ? '"$_spokenText"'
+                          : 'Habla: ej. "zapato caballero cuesta 800 sin ganancia corrida del 20 al 25"...',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withValues(
+                            alpha: _spokenText.isNotEmpty ? 1.0 : 0.65),
+                        fontSize: _spokenText.isNotEmpty ? 16 : 13.5,
+                        fontStyle: FontStyle.italic,
+                        fontWeight: FontWeight.w600,
+                        shadows: [
+                          Shadow(
+                            color: const Color(0xFF00FF7F).withValues(alpha: 0.4),
+                            blurRadius: 10,
                           ),
                         ],
                       ),
                     ),
-                  ],
-                ),
-                if (_spokenText.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '"$_spokenText"',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13.5,
-                        fontStyle: FontStyle.italic,
-                        fontWeight: FontWeight.w600,
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  // LISTA QUE MUESTRA LO DETECTADO Y LO QUE FALTA (FROSTED EMERALD SIN MARCOS BLANCOS)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xCC061C0E),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                          color: const Color(0xFF114D28),
+                          width: 1.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.4),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          _buildRequirementRow(
+                            isComplete: hasCost,
+                            completeText:
+                                'Costo: \$${_costPrice.toStringAsFixed(2)}',
+                            pendingText: 'Falta: Costo (ej. cuesta 800)',
+                            icon: Icons.attach_money_rounded,
+                          ),
+                          const Divider(color: Color(0xFF114D28), height: 16),
+                          _buildRequirementRow(
+                            isComplete: hasTypeAndCat,
+                            completeText: productCatText,
+                            pendingText:
+                                'Falta: ¿Zapato o Ropa? ¿Dama, Caballero o Niño?',
+                            icon: Icons.checkroom_rounded,
+                          ),
+                          const Divider(color: Color(0xFF114D28), height: 16),
+                          _buildRequirementRow(
+                            isComplete: hasSizes,
+                            completeText: 'Tallas: $_sizesFormatted',
+                            pendingText:
+                                'Falta: Tallas (ej. corrida del 20 al 25)',
+                            icon: Icons.straighten_rounded,
+                          ),
+                          const Divider(color: Color(0xFF114D28), height: 16),
+                          _buildRequirementRow(
+                            isComplete: hasExtra,
+                            completeText: _selectedExtra != null
+                                ? 'Ganancia extra: +\$$_selectedExtra'
+                                : 'Sin ganancia extra',
+                            pendingText: 'Ganancia extra (Opcional)',
+                            icon: Icons.add_chart_rounded,
+                            isOptional: true,
+                          ),
+                        ],
                       ),
                     ),
                   ),
+
+                  const SizedBox(height: 24),
                 ],
-              ],
+              ),
+            ),
+          ),
+        );
+  }
+
+  Widget _buildRequirementRow({
+    required bool isComplete,
+    required String completeText,
+    required String pendingText,
+    required IconData icon,
+    bool isOptional = false,
+  }) {
+    return Row(
+      children: [
+        Icon(
+          isComplete
+              ? Icons.check_circle_rounded
+              : (isOptional
+                  ? Icons.info_outline_rounded
+                  : Icons.radio_button_unchecked_rounded),
+          size: 19,
+          color: isComplete
+              ? const Color(0xFF00FF7F)
+              : (isOptional ? Colors.white38 : Colors.white60),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            isComplete ? completeText : pendingText,
+            style: TextStyle(
+              color: isComplete
+                  ? Colors.white
+                  : (isOptional ? Colors.white38 : Colors.white70),
+              fontSize: 13.5,
+              fontWeight: isComplete ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 
@@ -1392,10 +1779,12 @@ Reglas:
   }
 
   // ---------------------------------------------------------------------------
-  // 2. GANANCIA EXTRA (Opcional)
+  // 2. GANANCIA EXTRA (Opcional: 10, 20, 30, 40, 50 o personalizado)
   // ---------------------------------------------------------------------------
   Widget _buildExtraProfitCard() {
     final bool isExpanded = _activeStep == 2;
+    final bool isCustomSelected =
+        _selectedExtra != null && !_extraOptions.contains(_selectedExtra);
 
     return _SectionCard(
       child: Column(
@@ -1460,51 +1849,136 @@ Reglas:
             ),
           ),
           if (isExpanded) ...[
-            const SizedBox(height: 10),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _extraOptions.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 1.6,
-              ),
-              itemBuilder: (context, index) {
-                final int amount = _extraOptions[index];
+            const SizedBox(height: 12),
+            // Fila con los 5 botones preestablecidos: 10, 20, 30, 40, 50
+            Row(
+              children: _extraOptions.map((amount) {
                 final bool isSelected = _selectedExtra == amount;
-
-                return InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _toggleExtraOption(amount),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color:
-                          isSelected ? Colors.white : const Color(0xFFF4F2ED),
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                    child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected
-                            ? const Color(0xFF7CA6F8)
-                            : Colors.transparent,
-                        width: 2,
-                      ),
-                    ),
-                    child: Text(
-                      '+\$$amount',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: isSelected
-                            ? const Color(0xFF18181B)
-                            : const Color(0xFF3F3F46),
+                      onTap: () => _toggleExtraOption(amount),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.white
+                              : const Color(0xFFF4F2ED),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF7CA6F8)
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                        child: Text(
+                          '+\$$amount',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: isSelected
+                                ? const Color(0xFF18181B)
+                                : const Color(0xFF3F3F46),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 );
-              },
+              }).toList(),
+            ),
+            const SizedBox(height: 10),
+            // Opción abajo para escribir otro monto diferente
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color:
+                    isCustomSelected ? Colors.white : const Color(0xFFF4F2ED),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isCustomSelected
+                      ? const Color(0xFF7CA6F8)
+                      : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.add_circle_outline_rounded,
+                    size: 20,
+                    color: isCustomSelected
+                        ? const Color(0xFF2563EB)
+                        : const Color(0xFF71717A),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Otro monto: +',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: isCustomSelected
+                          ? const Color(0xFF18181B)
+                          : const Color(0xFF3F3F46),
+                    ),
+                  ),
+                  const Text(
+                    '\$',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF18181B),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: TextField(
+                      controller: _customExtraController,
+                      focusNode: _customExtraFocusNode,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(4),
+                      ],
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF18181B),
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: 'Ej. 25, 60...',
+                        hintStyle: TextStyle(
+                          color: Color(0xFFA1A1AA),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 8),
+                      ),
+                      onChanged: _onCustomExtraChanged,
+                    ),
+                  ),
+                  if (_customExtraController.text.isNotEmpty)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: _clearCustomExtra,
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.cancel,
+                          size: 18,
+                          color: Color(0xFFA1A1AA),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
             const SizedBox(height: 10),
             SizedBox(
@@ -1518,7 +1992,9 @@ Reglas:
                   ),
                 ),
                 child: Text(
-                  _selectedExtra == null ? 'Omitir paso' : 'Siguiente',
+                  _selectedExtra == null
+                      ? 'Omitir paso'
+                      : 'Siguiente (+\$$_selectedExtra)',
                   style: const TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
@@ -2203,3 +2679,265 @@ class _SectionCard extends StatelessWidget {
     );
   }
 }
+
+/// Visualizador inmersivo de orbe de energía y luz: relajado, sereno y con
+/// pequeños espasmos sutiles y reactivos únicamente cuando se habla.
+class PlasmaOrbPainter extends CustomPainter {
+  final double animationValue; // 0.0 a 1.0 lineal
+  final double soundLevel; // 0.0 a 1.0
+  final double spasmIntensity; // 0.0 a 0.5 (pequeños espasmos reactivos a la voz)
+  final bool isListening;
+  final bool isComplete;
+
+  PlasmaOrbPainter({
+    required this.animationValue,
+    required this.soundLevel,
+    required this.spasmIntensity,
+    required this.isListening,
+    required this.isComplete,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Offset center = Offset(size.width / 2, size.height / 2);
+    final double baseR = size.width * 0.31; // ~86px
+
+    // Respiración serena y relajada (lenta y suave)
+    final double calmBreathe = math.sin(animationValue * 2 * math.pi) * 2.5;
+
+    // Reactividad sutil controlada (pequeños espasmos, no exagerados)
+    final double subtleSpasm = isComplete
+        ? 0.0
+        : (spasmIntensity * 0.8 + soundLevel * 0.3).clamp(0.0, 0.6);
+    final double spasmJitter = isComplete
+        ? 0.0
+        : (math.sin(animationValue * 24 * math.pi) * 2.0 * spasmIntensity);
+
+    // 1. AURA EXTERIOR SUAVE Y DIFUMINADA (Brillo esmeralda relajante)
+    final double auraRadius = baseR * 1.45 + calmBreathe + (subtleSpasm * 12.0);
+    final Paint auraPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          (isComplete ? const Color(0xFF00FF7F) : const Color(0xFF00FF88))
+              .withValues(alpha: (0.35 + subtleSpasm * 0.25).clamp(0.0, 1.0)),
+          const Color(0xFF00E676)
+              .withValues(alpha: (0.12 + subtleSpasm * 0.1).clamp(0.0, 1.0)),
+          const Color(0xFF003318).withValues(alpha: 0.0),
+        ],
+        stops: const [0.0, 0.55, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: auraRadius));
+    canvas.drawCircle(center, auraRadius, auraPaint);
+
+    // 2. ONDA DE CHOQUE SUAVE Y LENTA (1 onda tenue periódica)
+    final double wavePhase = animationValue % 1.0;
+    final double waveRadius = baseR * 0.8 + wavePhase * (baseR * 0.55);
+    final double waveAlpha =
+        (1.0 - wavePhase).clamp(0.0, 1.0) * (0.2 + subtleSpasm * 0.25);
+    if (waveAlpha > 0.02) {
+      final Paint wavePaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.4
+        ..color = const Color(0xFF00FF7F)
+            .withValues(alpha: waveAlpha.clamp(0.0, 1.0));
+      canvas.drawCircle(center, waveRadius, wavePaint);
+    }
+
+    // 3. ANILLOS ORGÁNICOS SUAVES (Curvas armónicas tranquilas con micro-espasmos solo al hablar)
+    _drawCalmWaveRing(
+      canvas: canvas,
+      center: center,
+      radius: baseR * 1.08 + calmBreathe,
+      harmonic: 5,
+      speed: 2.0,
+      baseAmplitude: 2.0,
+      spasmExtra: subtleSpasm * 4.5,
+      jitter: spasmJitter,
+      color: const Color(0xFF00FF88),
+      alpha: 0.65 + subtleSpasm * 0.2,
+      strokeWidth: 2.0,
+    );
+
+    _drawCalmWaveRing(
+      canvas: canvas,
+      center: center,
+      radius: baseR * 0.92 - calmBreathe * 0.5,
+      harmonic: 7,
+      speed: -2.5,
+      baseAmplitude: 1.5,
+      spasmExtra: subtleSpasm * 3.5,
+      jitter: -spasmJitter * 0.6,
+      color: const Color(0xFF69F0AE),
+      alpha: 0.75,
+      strokeWidth: 1.8,
+    );
+
+    // 4. MICRO-ESPASMO ELÉCTRICO SUTIL (Únicamente cuando se habla)
+    if (!isComplete && spasmIntensity > 0.15) {
+      _drawSubtleElectricSpasm(canvas, center, baseR, subtleSpasm);
+    }
+
+    // 5. CHISPAS DE POLVO LUMINOSO FLOTANDO SERENAS
+    _drawGentleParticles(canvas, center, baseR, subtleSpasm);
+
+    // 6. NÚCLEO LUMINOSO SUAVE (Centro radiante acogedor)
+    final double coreR =
+        baseR * 0.52 + (calmBreathe * 0.8) + (subtleSpasm * 8.0);
+    final Paint corePaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          Colors.white,
+          const Color(0xFFE8FFF3),
+          const Color(0xFF00FF7F).withValues(alpha: 0.8),
+          const Color(0xFF00E676).withValues(alpha: 0.0),
+        ],
+        stops: const [0.0, 0.4, 0.75, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: coreR));
+    canvas.drawCircle(center, coreR, corePaint);
+
+    // Destello interior sutil
+    final Paint whiteCenter = Paint()
+      ..color = Colors.white
+          .withValues(alpha: (0.65 + subtleSpasm * 0.25).clamp(0.0, 1.0))
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawCircle(center, coreR * 0.38, whiteCenter);
+  }
+
+  void _drawCalmWaveRing({
+    required Canvas canvas,
+    required Offset center,
+    required double radius,
+    required int harmonic,
+    required double speed,
+    required double baseAmplitude,
+    required double spasmExtra,
+    required double jitter,
+    required Color color,
+    required double alpha,
+    required double strokeWidth,
+  }) {
+    final Path path = Path();
+    const int segments = 80;
+    const double step = (math.pi * 2) / segments;
+
+    for (int i = 0; i <= segments; i++) {
+      final double theta = i * step;
+      // Ondulación senoidal suave y relajada
+      final double wave =
+          math.sin(theta * harmonic + animationValue * speed * math.pi);
+      // Pequeño micro-espasmo armónico sólo cuando se habla
+      final double microSpasm =
+          math.sin(theta * 17 + animationValue * 18 * math.pi) * spasmExtra;
+      final double r = radius + wave * baseAmplitude + microSpasm + jitter;
+
+      final double x = center.dx + r * math.cos(theta);
+      final double y = center.dy + r * math.sin(theta);
+
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    path.close();
+
+    // Resplandor suave del borde
+    final Paint glowPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth * 2.2
+      ..color = color.withValues(alpha: (alpha * 0.35).clamp(0.0, 1.0))
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawPath(path, glowPaint);
+
+    // Borde armónico
+    final Paint linePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = color.withValues(alpha: alpha.clamp(0.0, 1.0));
+    canvas.drawPath(path, linePaint);
+  }
+
+  void _drawSubtleElectricSpasm(
+    Canvas canvas,
+    Offset center,
+    double baseR,
+    double subtleSpasm,
+  ) {
+    // Solo 1 o 2 filamentos muy delicados, delgados y breves
+    const int filaments = 2;
+    for (int f = 0; f < filaments; f++) {
+      final double angle = (f * math.pi) +
+          (animationValue * 2.0 * math.pi) +
+          (math.sin(f * 2.5 + animationValue * 8) * 0.3);
+
+      final double startDist = baseR * 0.4;
+      final double endDist = baseR * (1.02 + subtleSpasm * 0.12);
+
+      final Offset start = Offset(
+        center.dx + startDist * math.cos(angle),
+        center.dy + startDist * math.sin(angle),
+      );
+      final Offset end = Offset(
+        center.dx + endDist * math.cos(angle + 0.2),
+        center.dy + endDist * math.sin(angle + 0.2),
+      );
+
+      final Path p = Path();
+      p.moveTo(start.dx, start.dy);
+      const int steps = 5;
+      final double dx = (end.dx - start.dx) / steps;
+      final double dy = (end.dy - start.dy) / steps;
+      final double len = math.sqrt(dx * dx + dy * dy);
+      final double nx = -dy / (len > 0 ? len : 1);
+      final double ny = dx / (len > 0 ? len : 1);
+
+      for (int s = 1; s < steps; s++) {
+        final double jitter =
+            math.sin((f * 13.0) + (s * 3.7) + (animationValue * 25)) *
+                (2.5 * subtleSpasm * (1.0 - (s / steps - 0.5).abs()));
+        p.lineTo(
+            start.dx + dx * s + nx * jitter, start.dy + dy * s + ny * jitter);
+      }
+      p.lineTo(end.dx, end.dy);
+
+      final Paint filamentPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..color = Colors.white
+            .withValues(alpha: (0.8 * subtleSpasm).clamp(0.0, 1.0))
+        ..strokeCap = StrokeCap.round;
+      canvas.drawPath(p, filamentPaint);
+    }
+  }
+
+  void _drawGentleParticles(
+    Canvas canvas,
+    Offset center,
+    double baseR,
+    double subtleSpasm,
+  ) {
+    const int count = 16;
+    for (int i = 0; i < count; i++) {
+      final double pAngle = (i * 2.39996) +
+          (animationValue * (0.8 + (i % 3) * 0.2) * math.pi);
+      final double pDist = baseR * 0.5 + ((i * 11.3) % (baseR * 0.7));
+      final double px = center.dx + pDist * math.cos(pAngle);
+      final double py = center.dy + pDist * math.sin(pAngle);
+      final double pSize = 1.2 + (i % 2) * 0.6;
+      final double pAlpha =
+          (0.35 + (math.sin(pAngle * 2 + animationValue * 4) * 0.2))
+              .clamp(0.1, 0.7);
+
+      final Paint pPaint = Paint()
+        ..color = const Color(0xFF00FF7F).withValues(alpha: pAlpha);
+      canvas.drawCircle(Offset(px, py), pSize, pPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant PlasmaOrbPainter oldDelegate) {
+    return true;
+  }
+}
+
+// Compatibilidad por si se llama con el nombre anterior
+typedef WavyVisualizerPainter = PlasmaOrbPainter;
