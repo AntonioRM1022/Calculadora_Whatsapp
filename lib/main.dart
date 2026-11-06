@@ -164,19 +164,12 @@ Reglas:
   double? _previousPrice;
   double? _socioPrice;
   double? _promoCost;
-  double? _customOfferPrice;
-  bool _noProfitMode = false;
+  String? _promoLabel;
 
   double get _basePriceRoundedTo10 {
     if (_costPrice <= 0) return 0.0;
     final double with50 = _costPrice * 1.5;
     return (with50 / 10.0).ceil() * 10.0;
-  }
-
-  int get _roundingTo10Extra {
-    if (_costPrice <= 0) return 0;
-    final double with50 = _costPrice * 1.5;
-    return math.max(0, (_basePriceRoundedTo10 - with50).round());
   }
 
   // Contador de uso de IA y tokens gratuitos diarios (1500 consultas/día)
@@ -902,23 +895,29 @@ Reglas:
 Eres un asistente experto para extraer ofertas de capturas de pantalla de catálogos como Price Shoes y tiendas de calzado/ropa.
 Analiza detenidamente la imagen y devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
 {
-  "marca": "Nike",
-  "nombre_producto": "Tenis para correr Nike Stellar Ride (GS)",
+  "marca": "Goodyear",
+  "nombre_producto": "Tenis Casual Goodyear",
   "tipo": "tenis",
-  "categoria": "juniors",
-  "precio_socio": 1249,
-  "precio_promo": 1124,
+  "categoria": "caballero",
+  "precio_socio": 699,
+  "precio_promo": 440,
+  "tipo_promo": "Exclusivo Online",
   "tallas": []
 }
 Reglas estrictas:
-- "marca": Nombre de la marca que aparece en la parte superior o en el nombre (ej. en "Nike - JUNIORS" la marca es "Nike"; ej. "Adidas", "Puma", "Pirma", "Charly", "Flexi", "Converse", "Vans", "Skechers", "Reebok", "Levis", etc.). Si no hay marca visible, pon "".
-- "nombre_producto": Nombre completo del artículo o marca visible (ej. "Tenis Para Correr Nike Stellar Ride (GS)", "Tenis Charly", etc.).
+- "marca": Nombre de la marca que aparece en la parte superior o en el nombre (ej. "Goodyear", "Nike", "Adidas", "Puma", "Pirma", "Charly", "Flexi", "Converse", "Vans", "Skechers", "Reebok", "Levis", etc.). Si no hay marca visible, pon "".
+- "nombre_producto": Nombre completo del artículo o marca visible (ej. "Tenis Casual", "Tenis Para Correr Nike Stellar Ride (GS)", etc.).
 - "tipo": 'tenis' (si son tenis, zapatillas deportivas o sneakers), 'calzado' (si son zapatos, botas, sandalias, tacones, pantuflas) o 'prenda' (si es ropa, blusa, playera, suéter, pantalón, etc.).
-- "categoria": Extrae exactamente la categoría o público que aparece en el catálogo tal cual sale: 'dama', 'caballero', 'niño', 'niña', 'juniors', 'teens', 'bebe', 'beba' o 'unisex'. (Si dice JUNIORS o juniors, pon 'juniors'; si dice TEENS, 'teens'; si NIÑA, 'niña'; si NIÑO, 'niño'; si BEBE, 'bebe'; si BEBA, 'beba').
-- "precio_socio": número exacto que acompaña a la palabra 'Socio' (ej. en 'Socio: \$1,249', extrae 1249). ¡IGNORA POR COMPLETO 'Al público'!.
-- "precio_promo": número exacto que acompaña a 'Promo M' o precio de promoción (ej. en 'Promo M:\$1,124', extrae 1124). Si no hay promo, usa el mismo valor de precio_socio.
+- "categoria": Extrae exactamente la categoría o público que aparece en el catálogo tal cual sale: 'dama', 'caballero', 'niño', 'niña', 'juniors', 'teens', 'bebe', 'beba' o 'unisex'. (Si dice CABALLERO, pon 'caballero'; si dice DAMA, 'dama'; si dice JUNIORS o juniors, pon 'juniors'; si dice TEENS, 'teens'; etc.).
+- "precio_socio": número exacto que acompaña a la palabra 'Socio' (ej. en 'Socio: \$699' o 'Socio: \$1,249', extrae 699 o 1249). ¡IGNORA POR COMPLETO 'Al público'!.
+- "precio_promo": número exacto del precio especial o promoción que aparece en color magenta/rosa/morado o destacado, tal como:
+  * 'Exclusivo Online' (ej. en 'Exclusivo Online: \$440' o badge 'EXCLUSIVO ONLINE', extrae 440).
+  * 'Promo M' (ej. en 'Promo M:\$1,124', extrae 1124).
+  * 'Dto. de temporada' (si no hay Promo M ni Exclusivo Online, ej. 'Dto. de temporada: \$629' extrae 629).
+  Si hay varios, SIEMPRE extrae el precio de promoción más bajo ('Promo M' o 'Exclusivo Online'). Si no hay ningún precio de promo o exclusivo online, usa el mismo valor de precio_socio.
+- "tipo_promo": 'Exclusivo Online' si la promoción dice 'Exclusivo Online', 'Promo M' si dice 'Promo M', o el nombre de la promo detectada. Si no hay promo, pon "".
 - "tallas": lista de strings de tallas si están visibles en la imagen (ej. ["22", "23"]); si no hay tallas visibles, devuelve [].
-¡REGLA DE ORO!: NUNCA tomes el valor de 'Al público' ni números ajenos. Solo nos interesan EXCLUSIVAMENTE 'Socio' y 'Promo M'.
+¡REGLA DE ORO!: NUNCA tomes el valor de 'Al público' ni números de pagos semanales (CrediPrice). El costo de compra activo es SIEMPRE el precio de promoción ('Promo M' o 'Exclusivo Online'); si no existe ninguno de estos dos, toma 'Socio'.
 ''';
 
       final imageBytes = await pickedFile.readAsBytes();
@@ -963,8 +962,8 @@ Reglas estrictas:
           final double normalCalc = ((socio * 1.5) / 50.0).ceil() * 50.0;
           final double promoCalc = ((promo * 1.5) / 50.0).ceil() * 50.0;
           final double activeCost = promo > 0 ? promo : socio;
-          final double base50 = activeCost * 1.5;
-          final int extraDiff = math.max(0, (promoCalc - base50).round());
+          final double base10 = ((activeCost * 1.5) / 10.0).ceil() * 10.0;
+          final int extraDiff = math.max(0, (promoCalc - base10).round());
 
           String detectedType = 'Tenis';
           final nameLower = (nombreRaw ?? '').toLowerCase();
@@ -979,9 +978,10 @@ Reglas estrictas:
             detectedBrand = marcaRaw.trim();
           } else {
             final commonBrands = [
-              'Nike', 'Adidas', 'Puma', 'Pirma', 'Charly', 'Converse', 'Vans',
+              'Goodyear', 'Nike', 'Adidas', 'Puma', 'Pirma', 'Charly', 'Converse', 'Vans',
               'Reebok', 'Flexi', 'Skechers', 'Under Armour', 'Jordan', 'Fila',
-              'Levis', 'Champion', 'K-Swiss', 'DC', 'Timberland', 'Crocs', 'Panam'
+              'Levis', 'Champion', 'K-Swiss', 'DC', 'Timberland', 'Crocs', 'Panam',
+              'Perry Ellis', 'Discovery', 'SwissBrand', 'Lee', 'Wrangler', 'Aeropostale'
             ];
             for (final b in commonBrands) {
               if (nameLower.contains(b.toLowerCase())) {
@@ -1045,15 +1045,30 @@ Reglas estrictas:
                   .toList() ??
               [];
 
+          final String? tipoPromoRaw = decoded['tipo_promo']?.toString();
+          String detectedPromoLabel = 'Promo M';
+          if (tipoPromoRaw != null && tipoPromoRaw.trim().isNotEmpty) {
+            final lower = tipoPromoRaw.toLowerCase();
+            if (lower.contains('online') || lower.contains('exclusivo')) {
+              detectedPromoLabel = 'Exclusivo Online';
+            } else if (lower.contains('temporada')) {
+              detectedPromoLabel = 'Dto. Temporada';
+            } else if (lower.contains('promo')) {
+              detectedPromoLabel = 'Promo M';
+            } else {
+              detectedPromoLabel = tipoPromoRaw.trim();
+            }
+          }
+
           if (mounted) {
             setState(() {
               _selectedImage = null; // No guardar la captura como foto de producto
               _socioPrice = socio;
               _promoCost = promo;
+              _promoLabel = (promo > 0 && promo != socio) ? detectedPromoLabel : null;
               _costPrice = promo > 0 ? promo : socio;
               _costController.text = _costPrice.toStringAsFixed(2);
               _previousPrice = normalCalc > 0 ? normalCalc : null;
-              _customOfferPrice = promoCalc > 0 ? promoCalc : null;
 
               _selectedExtra = extraDiff;
               if (_extraOptions.contains(extraDiff)) {
@@ -1541,22 +1556,13 @@ Reglas estrictas:
     );
   }
 
-  // Fórmula: Costo + (Costo * 0.50) + GananciaExtra o Precio Oferta calculado por catálogo
-  double get _baseProfit => _costPrice * 0.50;
-  double get _totalProfit {
-    if (_noProfitMode) {
-      return math.max(0, _finalPrice - _costPrice);
-    }
-    return _customOfferPrice != null
-        ? (_customOfferPrice! - _costPrice)
-        : (_baseProfit + (_selectedExtra ?? 0));
+  // Fórmula: (Costo + 50%) al 10 + GananciaExtra
+  double get _finalPrice {
+    return _basePriceRoundedTo10 + (_selectedExtra ?? 0);
   }
 
-  double get _finalPrice {
-    if (_noProfitMode) {
-      return _basePriceRoundedTo10;
-    }
-    return _customOfferPrice ?? (_costPrice + _totalProfit);
+  double get _totalProfit {
+    return math.max(0, _finalPrice - _costPrice);
   }
 
   List<String> get _currentSizeOptions {
@@ -1673,7 +1679,6 @@ Reglas estrictas:
       _costController.clear();
       _costPrice = 0.0;
       _previousPrice = null;
-      _customOfferPrice = null;
     });
     _costFocusNode.requestFocus();
   }
@@ -1688,8 +1693,7 @@ Reglas estrictas:
       _previousPrice = null;
       _socioPrice = null;
       _promoCost = null;
-      _customOfferPrice = null;
-      _noProfitMode = false;
+      _promoLabel = null;
       _spokenText = '';
       _costController.clear();
       _costPrice = 0.0;
@@ -1736,7 +1740,6 @@ Reglas estrictas:
     setState(() {
       _costPrice = parsed;
       _previousPrice = null;
-      _customOfferPrice = null;
     });
   }
 
@@ -1749,18 +1752,299 @@ Reglas estrictas:
     });
   }
 
+  void _showExtraProfitBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (modalContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final double base10 = _basePriceRoundedTo10;
+            final bool hasExtra = _selectedExtra != null && _selectedExtra! > 0;
+            final int currentExtra = _selectedExtra ?? 0;
+            final bool isCustom =
+                currentExtra > 0 && !_extraOptions.contains(currentExtra);
+
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 16,
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.tune_rounded,
+                        color: Color(0xFF2563EB),
+                        size: 22,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Ganancia extra',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF18181B),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(modalContext).pop(),
+                        icon: const Icon(Icons.close_rounded, size: 22),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Precio base (con 50% al 10): \$${base10.toInt()}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF71717A),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Botón grande: Quitar extra ($0)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () {
+                      setState(() {
+                        _selectedExtra = 0;
+                        _customExtraController.clear();
+                        _extraCompleted = true;
+                      });
+                      Navigator.of(modalContext).pop();
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 14,
+                        horizontal: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: !hasExtra
+                            ? const Color(0xFF2563EB)
+                            : const Color(0xFFF4F4F5),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: !hasExtra
+                              ? const Color(0xFF1D4ED8)
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            !hasExtra
+                                ? Icons.check_circle_rounded
+                                : Icons.radio_button_unchecked,
+                            color: !hasExtra
+                                ? Colors.white
+                                : const Color(0xFF71717A),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Quitar extra (\$0)',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: !hasExtra
+                                    ? Colors.white
+                                    : const Color(0xFF27272A),
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'Total: \$${base10.toInt()}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: !hasExtra
+                                  ? Colors.white
+                                  : const Color(0xFF71717A),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'O agrega ganancia extra en pesos:',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF52525B),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Fila de botones rápidos: +10, +20, +30, +40, +50
+                  Row(
+                    children: _extraOptions.map((amount) {
+                      final bool isSelected = currentExtra == amount;
+                      final int previewTotal = (base10 + amount).toInt();
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () {
+                              setState(() {
+                                _selectedExtra = amount;
+                                _customExtraController.clear();
+                                _extraCompleted = true;
+                              });
+                              Navigator.of(modalContext).pop();
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF2563EB)
+                                    : const Color(0xFFF4F4F5),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? const Color(0xFF1D4ED8)
+                                      : const Color(0xFFE4E4E7),
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    '+\$$amount',
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: isSelected
+                                          ? Colors.white
+                                          : const Color(0xFF18181B),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '\$$previewTotal',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: isSelected
+                                          ? Colors.white.withValues(alpha: 0.9)
+                                          : const Color(0xFF71717A),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  // Input para monto personalizado
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF4F4F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isCustom
+                            ? const Color(0xFF2563EB)
+                            : Colors.transparent,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.edit_rounded,
+                          size: 18,
+                          color: Color(0xFF71717A),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _customExtraController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              hintText: 'Otro monto en pesos (ej. 25, 35...)',
+                              border: InputBorder.none,
+                              isDense: true,
+                            ),
+                            onChanged: (val) {
+                              final parsed = int.tryParse(val.trim());
+                              setState(() {
+                                if (parsed != null && parsed >= 0) {
+                                  _selectedExtra = parsed;
+                                  _extraCompleted = true;
+                                }
+                              });
+                              setModalState(() {});
+                            },
+                          ),
+                        ),
+                        if (_customExtraController.text.isNotEmpty)
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(modalContext).pop();
+                            },
+                            child: const Text('Listo'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _toggleExtraOption(int amount) {
     FocusScope.of(context).unfocus();
     setState(() {
       if (_selectedExtra == amount) {
-        _selectedExtra = null;
+        _selectedExtra = 0;
         _customExtraController.clear();
       } else {
         _selectedExtra = amount;
         _customExtraController.clear();
-        _noProfitMode = false;
         _extraCompleted = true;
-        _activeStep = 3;
       }
     });
   }
@@ -1771,7 +2055,6 @@ Reglas estrictas:
     setState(() {
       if (parsed != null && parsed > 0) {
         _selectedExtra = parsed;
-        _noProfitMode = false;
         _extraCompleted = true;
       } else {
         _selectedExtra = null;
@@ -3131,27 +3414,21 @@ Reglas estrictas:
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: _noProfitMode
-                        ? const Color(0xFFEFF6FF)
-                        : (_selectedExtra != null
-                            ? const Color(0xFFE0F5E9)
-                            : const Color(0xFFEFECE6)),
+                    color: _selectedExtra != null && _selectedExtra! > 0
+                        ? const Color(0xFFE0F5E9)
+                        : const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    _noProfitMode
-                        ? '+\$$_roundingTo10Extra (Al 10)'
-                        : (_selectedExtra != null
-                            ? '+\$$_selectedExtra'
-                            : 'Opcional'),
+                    _selectedExtra != null && _selectedExtra! > 0
+                        ? '+\$$_selectedExtra'
+                        : 'Sin extra (al 10)',
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
-                      color: _noProfitMode
-                          ? const Color(0xFF2563EB)
-                          : (_selectedExtra != null
-                              ? const Color(0xFF0A2E16)
-                              : const Color(0xFF52525B)),
+                      color: _selectedExtra != null && _selectedExtra! > 0
+                          ? const Color(0xFF0A2E16)
+                          : const Color(0xFF2563EB),
                     ),
                   ),
                 ),
@@ -3171,120 +3448,104 @@ Reglas estrictas:
             secondChild: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const SizedBox(height: 12),
-                // Click para quitar ganancia extra y subir al 10
-                InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    setState(() {
-                      _noProfitMode = !_noProfitMode;
-                    });
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _noProfitMode
-                          ? const Color(0xFFEFF6FF)
-                          : const Color(0xFFF4F2ED),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: _noProfitMode
-                            ? const Color(0xFF3B82F6)
-                            : Colors.transparent,
-                        width: 1.8,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _noProfitMode
-                              ? Icons.check_box_rounded
-                              : Icons.check_box_outline_blank_rounded,
-                          color: _noProfitMode
-                              ? const Color(0xFF2563EB)
-                              : const Color(0xFF71717A),
-                          size: 22,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Sin ganancia extra (solo al 10)',
-                                style: TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: _noProfitMode
-                                      ? const Color(0xFF1E40AF)
-                                      : const Color(0xFF18181B),
-                                ),
-                              ),
-                              Text(
-                                _noProfitMode
-                                    ? 'Activo: Mantiene el 50% y solo sube +\$$_roundingTo10Extra para llegar a \$${_basePriceRoundedTo10.toInt()}'
-                                    : 'Mantiene tu 50% y solo añade los pesos necesarios para terminar en 10',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w500,
-                                  color: _noProfitMode
-                                      ? const Color(0xFF2563EB)
-                                      : const Color(0xFF71717A),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                const SizedBox(height: 10),
+                Text(
+                  'Base con 50% al 10: \$${_basePriceRoundedTo10.toInt()}. Elige cuánta ganancia extra deseas:',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF52525B),
                   ),
                 ),
-                const SizedBox(height: 12),
-                // Fila con los 5 botones preestablecidos: 10, 20, 30, 40, 50
+                const SizedBox(height: 10),
+                // Botón Sin extra y fila con los 5 botones: +10, +20, +30, +40, +50
                 Row(
-                  children: _extraOptions.map((amount) {
-                    final bool isSelected = _selectedExtra == amount;
-                    return Expanded(
+                  children: [
+                    // Botón Sin extra ($0)
+                    Expanded(
+                      flex: 4,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                        padding: const EdgeInsets.only(right: 3),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                          onTap: () => _toggleExtraOption(amount),
+                          onTap: () {
+                            setState(() {
+                              _selectedExtra = 0;
+                              _customExtraController.clear();
+                              _extraCompleted = true;
+                            });
+                          },
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 150),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Colors.white
+                              color: (_selectedExtra == null || _selectedExtra == 0) && !isCustomSelected
+                                  ? const Color(0xFF2563EB)
                                   : const Color(0xFFF4F2ED),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: isSelected
-                                    ? const Color(0xFF7CA6F8)
+                                color: (_selectedExtra == null || _selectedExtra == 0) && !isCustomSelected
+                                    ? const Color(0xFF1D4ED8)
                                     : Colors.transparent,
                                 width: 2,
                               ),
                             ),
                             child: Text(
-                              '+\$$amount',
+                              'Sin extra',
                               style: TextStyle(
-                                fontSize: 13.5,
+                                fontSize: 12.5,
                                 fontWeight: FontWeight.w800,
-                                color: isSelected
-                                    ? const Color(0xFF18181B)
+                                color: (_selectedExtra == null || _selectedExtra == 0) && !isCustomSelected
+                                    ? Colors.white
                                     : const Color(0xFF3F3F46),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    );
-                  }).toList(),
+                    ),
+                    ..._extraOptions.map((amount) {
+                      final bool isSelected = _selectedExtra == amount;
+                      return Expanded(
+                        flex: 3,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => _toggleExtraOption(amount),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? Colors.white
+                                    : const Color(0xFFF4F2ED),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? const Color(0xFF2563EB)
+                                      : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                              child: Text(
+                                '+\$$amount',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: isSelected
+                                      ? const Color(0xFF2563EB)
+                                      : const Color(0xFF18181B),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 // Opción abajo para escribir otro monto diferente
@@ -3388,11 +3649,9 @@ Reglas estrictas:
                       ),
                     ),
                     child: Text(
-                      _noProfitMode
-                          ? 'Siguiente (\$${_basePriceRoundedTo10.toInt()} al 10)'
-                          : (_selectedExtra == null
-                              ? 'Omitir paso'
-                              : 'Siguiente (+\$$_selectedExtra)'),
+                      _selectedExtra != null && _selectedExtra! > 0
+                          ? 'Siguiente (+\$$_selectedExtra • Total \$${_finalPrice.toInt()})'
+                          : 'Siguiente (Sin extra • Total \$${_finalPrice.toInt()})',
                       style: const TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w700,
@@ -4139,57 +4398,40 @@ Reglas estrictas:
                   ),
                 ),
               ),
-              // Botón rápido para quitar la ganancia (click al 10)
+              // Botón interactivo "Quitar o cambiar" para ajustar la ganancia extra
               InkWell(
                 borderRadius: BorderRadius.circular(16),
-                onTap: () {
-                  setState(() {
-                    _noProfitMode = !_noProfitMode;
-                    if (_noProfitMode) {
-                      _selectedExtra = null;
-                      _customExtraController.clear();
-                    }
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
+                onTap: _showExtraProfitBottomSheet,
+                child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
+                    horizontal: 10,
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: _noProfitMode
-                        ? const Color(0xFFEFF6FF)
-                        : const Color(0xFFF4F2ED),
+                    color: const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: _noProfitMode
-                          ? const Color(0xFF3B82F6)
-                          : const Color(0xFFE4E4E7),
+                      color: const Color(0xFF3B82F6),
                       width: 1.2,
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        _noProfitMode
-                            ? Icons.check_circle_rounded
-                            : Icons.remove_circle_outline_rounded,
+                      const Icon(
+                        Icons.tune_rounded,
                         size: 15,
-                        color: _noProfitMode
-                            ? const Color(0xFF2563EB)
-                            : const Color(0xFF71717A),
+                        color: Color(0xFF2563EB),
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _noProfitMode ? 'Sin extra (al 10)' : 'Quitar extra',
-                        style: TextStyle(
+                        _selectedExtra != null && _selectedExtra! > 0
+                            ? 'Quitar o cambiar (+\$$_selectedExtra)'
+                            : 'Quitar o cambiar',
+                        style: const TextStyle(
                           fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: _noProfitMode
-                              ? const Color(0xFF2563EB)
-                              : const Color(0xFF71717A),
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF2563EB),
                         ),
                       ),
                     ],
@@ -4205,31 +4447,17 @@ Reglas estrictas:
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: _noProfitMode
-                      ? const Color(0xFFEFF6FF)
-                      : (hasPrev
-                          ? const Color(0xFF63FF83)
-                          : const Color(0xFFE8F5E9)),
+                  color: hasPrev
+                      ? const Color(0xFF63FF83)
+                      : const Color(0xFFE8F5E9),
                   borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    if (hasPrev && !_noProfitMode)
-                      BoxShadow(
-                        color: const Color(0xFF63FF83).withValues(alpha: 0.4),
-                        blurRadius: 8,
-                        spreadRadius: 1,
-                      ),
-                  ],
                 ),
                 child: Text(
-                  _noProfitMode
-                      ? 'Al 10'
-                      : (hasPrev ? 'Promo M' : 'Sugerido'),
-                  style: TextStyle(
+                  hasPrev ? (_promoLabel ?? 'Promo M') : 'Sugerido',
+                  style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
-                    color: _noProfitMode
-                        ? const Color(0xFF2563EB)
-                        : const Color(0xFF0A2E16),
+                    color: Color(0xFF0A2E16),
                   ),
                 ),
               ),
@@ -4251,7 +4479,7 @@ Reglas estrictas:
             },
             child: Container(
               key: ValueKey<String>(
-                'final_price_${_finalPrice.toInt()}_${_previousPrice?.toInt() ?? 0}_${_shortProductTypeLabel}_$_noProfitMode',
+                'final_price_${_finalPrice.toInt()}_${_previousPrice?.toInt() ?? 0}_${_shortProductTypeLabel}_$_selectedExtra',
               ),
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
               decoration: BoxDecoration(
@@ -4307,7 +4535,7 @@ Reglas estrictas:
                   const SizedBox(height: 4),
                   Text(
                     hasPrev
-                        ? 'Socio \$${_socioPrice?.toInt() ?? 0} • Promo M \$${_promoCost?.toInt() ?? _costPrice.toInt()} • Ganancia \$${_totalProfit.toStringAsFixed(0)}'
+                        ? 'Socio \$${_socioPrice?.toInt() ?? 0} • ${_promoLabel ?? 'Promo M'} \$${_promoCost?.toInt() ?? _costPrice.toInt()} • Ganancia \$${_totalProfit.toStringAsFixed(0)}'
                         : 'Costo \$${_costPrice.toStringAsFixed(2)} + Ganancia \$${_totalProfit.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 13,
