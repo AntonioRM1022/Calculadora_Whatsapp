@@ -1745,18 +1745,25 @@ Pregunta de $_userName: "$userQuestion"
       }
     }
 
+    final List<dynamic>? rawAgotadas =
+        decoded['tallas_agotadas_tachadas'] as List<dynamic>?;
+    final Set<String> agotadasSet = (rawAgotadas ?? []).map((e) {
+      String s = e.toString().trim();
+      if (s.endsWith('.0')) s = s.substring(0, s.length - 2);
+      return s;
+    }).toSet();
+
     final List<dynamic>? rawSizes = decoded['tallas'] as List<dynamic>?;
-    final List<String> parsedSizes = rawSizes
-            ?.map((e) {
-              String s = e.toString().trim();
-              if (s.endsWith('.0')) {
-                s = s.substring(0, s.length - 2);
-              }
-              return s;
-            })
-            .where((s) => s.isNotEmpty)
-            .toList() ??
-        [];
+    final List<String> parsedSizes = (rawSizes ?? [])
+        .map((e) {
+          String s = e.toString().trim();
+          if (s.endsWith('.0')) {
+            s = s.substring(0, s.length - 2);
+          }
+          return s;
+        })
+        .where((s) => s.isNotEmpty && !agotadasSet.contains(s))
+        .toList();
 
     final String? tipoPromoRaw = decoded['tipo_promo']?.toString();
     String detectedPromoLabel = 'Promo M';
@@ -1841,6 +1848,7 @@ Analiza detenidamente la imagen y devuelve ÚNICAMENTE un JSON válido con esta 
   "precio_socio": 349,
   "precio_promo": 279,
   "tipo_promo": "Promo M",
+  "tallas_agotadas_tachadas": ["22.0"],
   "tallas": ["23", "24", "25", "26"],
   "box_2d": [120, 60, 380, 940]
 }
@@ -1856,7 +1864,8 @@ Reglas estrictas:
   * 'Dto. de temporada' (si no hay Promo M ni Exclusivo Online, ej. 'Dto. de temporada: \$629' extrae 629).
   Si hay varios, SIEMPRE extrae el precio de promoción más bajo ('Promo M' o 'Exclusivo Online'). Si no hay ningún precio de promo o exclusivo online, usa el mismo valor de precio_socio.
 - "tipo_promo": 'Exclusivo Online' si la promoción dice 'Exclusivo Online', 'Promo M' si dice 'Promo M', o el nombre de la promo detectada. Si no hay promo, pon "".
-- "tallas": lista de strings de las tallas disponibles visibles en los recuadros (ej. si ves "22.0", "23.0", "24.0", "25.0", "26.0", quita el ".0" y devuelve ["22", "23", "24", "25", "26"]; si una talla está tachada con una línea diagonal por estar agotada, NO la incluyas). Si no hay tallas visibles, devuelve [].
+- "tallas_agotadas_tachadas": lista de strings con las tallas que tienen una LÍNEA DIAGONAL cruzando el recuadro (slash '/' o tachón diagonal) indicando que NO hay existencias (ej. si el recuadro de "22.0" está cruzado por una línea diagonal, pon ["22.0"]). Si ninguna tiene línea diagonal, pon [].
+- "tallas": lista de strings ÚNICAMENTE de las tallas DISPONIBLES y limpias que NO tienen línea diagonal cruzándolas. (Quita el ".0", ej. si "22.0" tiene una línea diagonal y "23.0", "24.0", "25.0", "26.0" están limpias, devuelve ["23", "24", "25", "26"]). ¡NUNCA incluyas en "tallas" un recuadro que tenga una raya diagonal o esté tachado!
 - "box_2d": arreglo de 4 enteros [ymin, xmin, ymax, xmax] en escala de 0 a 1000 que encierran ÚNICAMENTE la fotografía del producto (el zapato, sandalia, tenis, bota o prenda). No incluyas la barra superior de búsqueda ("Buscar producto por ID"), ni el icono de compartir, ni el texto de "usuarios están viendo este producto", ni los puntos del carrusel, ni los textos de abajo. Si en la imagen NO aparece la foto del producto (solo texto), devuelve [].
 ¡REGLA DE ORO!: NUNCA tomes el valor de 'Al público' ni números de pagos semanales (CrediPrice). El costo de compra activo es SIEMPRE el precio de promoción ('Promo M' o 'Exclusivo Online'); si no existe ninguno de estos dos, toma 'Socio'.
 ''';
