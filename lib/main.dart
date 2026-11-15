@@ -810,7 +810,11 @@ Reglas:
 
     final int prevPrice = _previousPrice?.toInt() ?? 0;
     final int base10Price = _basePriceRoundedTo10.toInt();
-    final int extraPesos = _selectedExtra ?? 50;
+    final int extraPesos = _selectedExtra ??
+        _calculateSuggestedExtra(
+          base10Price.toDouble(),
+          prevPrice: prevPrice > 0 ? prevPrice.toDouble() : null,
+        );
     final int finalPriceTotal = base10Price + extraPesos;
 
     final String sizesText = _selectedSizes.isNotEmpty
@@ -821,14 +825,24 @@ Reglas:
         ? 'Su precio anterior es de $prevPrice pesos. '
         : '';
 
+    final String extraProposal = extraPesos == 0
+        ? 'El precio base es de $base10Price pesos, y te sugiero dejarlo sin ganancia extra para mantener una oferta muy atractiva de $finalPriceTotal pesos.'
+        : 'El precio base sin ganancia extra es de $base10Price pesos, y te sugiero agregarle esta ganancia cosmética de $extraPesos pesos para que quede en $finalPriceTotal pesos.';
+
     return '¡Hola $_userName! Terminé el escaneo. Extraje unos $title$sizesText. '
-        '${prevPart}El precio base sin ganancia extra es de $base10Price pesos, '
-        'y tengo la idea de agregarle esta ganancia extra de $extraPesos pesos para que quede en $finalPriceTotal pesos. '
+        '$prevPart$extraProposal '
+        'Antes de hablar, recuerda esperar a que suene el micrófono. '
         '¿Te parece perfecto, o gustas cambiarlo a uno diferente? Y si ya te gusta solo dime "compártelo" para abrir WhatsApp.';
   }
 
   Future<void> _triggerSofiaAssistantGreeting() async {
     if (!mounted) return;
+    final int base10Price = _basePriceRoundedTo10.toInt();
+    final int prevPrice = _previousPrice?.toInt() ?? 0;
+    _selectedExtra ??= _calculateSuggestedExtra(
+      base10Price.toDouble(),
+      prevPrice: prevPrice > 0 ? prevPrice.toDouble() : null,
+    );
     final String dialog = _buildSofiaDialogText();
     setState(() {
       _botDialogText = dialog;
@@ -919,14 +933,15 @@ Reglas:
         lower.contains('asi esta bien')) {
       _isExecutingVoiceAction = true;
       _speech.stop();
+      final int current = _selectedExtra ?? 0;
       setState(() {
         _isListeningToSofiaResponse = false;
-        _selectedExtra = _selectedExtra ?? 50;
         _saveCurrentStateToBatchItem();
       });
-      _speakBotDialog(
-          '¡Excelente $_userName! Quedó con 50 pesos de ganancia extra. Dime "compártelo" cuando quieras abrir WhatsApp.',
-          autoListenAfter: true);
+      final String msg = current > 0
+          ? '¡Excelente $_userName! Quedó con $current pesos de ganancia extra. Dime "compártelo" cuando quieras abrir WhatsApp.'
+          : '¡Excelente $_userName! Quedó sin ganancia extra en ${_basePriceRoundedTo10.toInt()} pesos. Dime "compártelo" cuando quieras abrir WhatsApp.';
+      _speakBotDialog(msg, autoListenAfter: true);
       return;
     }
 
@@ -1668,8 +1683,11 @@ Pregunta de $_userName: "$userQuestion"
 
     final double normalCalc = ((socio * 1.5) / 50.0).ceil() * 50.0;
     final double activeCost = promo > 0 ? promo : socio;
-    // Sugerencia inicial por defecto de 50 pesos de ganancia extra
-    const int extraDiff = 50;
+    final double base10Calculated = ((activeCost * 1.5) / 10.0).ceil() * 10.0;
+    final int extraDiff = _calculateSuggestedExtra(
+      base10Calculated,
+      prevPrice: normalCalc > 0 ? normalCalc : null,
+    );
 
     String detectedType = 'Tenis';
     final nameLower = (nombreRaw ?? '').toLowerCase();
@@ -2387,6 +2405,55 @@ Reglas estrictas:
         duration: const Duration(seconds: 3),
       ),
     );
+  }
+
+  int _calculateSuggestedExtra(double basePriceRoundedTo10, {double? prevPrice}) {
+    if (basePriceRoundedTo10 <= 450.0) {
+      return 0; // Menor o igual a 450 -> sugerencia sin ganancia extra
+    }
+
+    final int base = basePriceRoundedTo10.toInt();
+    final int rem100 = base % 100;
+    int candidateExtra = 50;
+
+    // Prioridad 1: Precio cosmético terminado en 90
+    if (rem100 == 40) {
+      candidateExtra = 50; // ej. 540 + 50 = 590
+    } else if (rem100 == 50) {
+      candidateExtra = 40; // ej. 550 + 40 = 590
+    } else if (rem100 == 60) {
+      candidateExtra = 30; // ej. 460 + 30 = 490
+    } else if (rem100 == 70) {
+      candidateExtra = 20; // ej. 470 + 20 = 490
+    } else if (rem100 == 80) {
+      candidateExtra = 10; // ej. 480 + 10 = 490
+    } else if (rem100 == 90) {
+      candidateExtra = 10; // ej. 490 + 10 = 500 (número redondo cerrado)
+    }
+    // Prioridad 2: Precio cosmético terminado en 50
+    else if (rem100 == 0) {
+      candidateExtra = 50; // ej. 500 + 50 = 550
+    } else if (rem100 == 10) {
+      candidateExtra = 40; // ej. 510 + 40 = 550
+    } else if (rem100 == 20) {
+      candidateExtra = 30; // ej. 520 + 30 = 550
+    } else if (rem100 == 30) {
+      candidateExtra = 20; // ej. 530 + 20 = 550
+    }
+
+    // Si hay precio anterior, la oferta debe ser menor al precio anterior
+    if (prevPrice != null && prevPrice > 0) {
+      if (base + candidateExtra >= prevPrice) {
+        for (final extra in [40, 30, 20, 10, 0]) {
+          if (base + extra < prevPrice) {
+            candidateExtra = extra;
+            break;
+          }
+        }
+      }
+    }
+
+    return candidateExtra;
   }
 
   // Fórmula: (Costo + 50%) al 10 + GananciaExtra
@@ -3355,7 +3422,7 @@ Reglas estrictas:
                     Expanded(
                       child: Text(
                         _sofiaSpokenResponse.isEmpty
-                            ? 'Te escucho $_userName...'
+                            ? '🔔 Escuchando tras el tono, $_userName...'
                             : _sofiaSpokenResponse,
                         style: const TextStyle(
                           fontSize: 13,
@@ -3377,127 +3444,135 @@ Reglas estrictas:
                 ActionChip(
                   avatar: const Icon(Icons.thumb_up_alt_rounded,
                       size: 15, color: Color(0xFF0F2B5C)),
-                  label: const Text('Me parece perfecto (+\$50)'),
-                  backgroundColor: currentExtra == 50
-                      ? const Color(0xFFDBEAFE)
-                      : Colors.white,
-                  side: BorderSide(
-                    color: currentExtra == 50
-                        ? const Color(0xFF1D4ED8)
-                        : const Color(0xFFD1D5DB),
-                    width: currentExtra == 50 ? 1.5 : 1,
+                  label: Text(currentExtra > 0
+                      ? 'Me parece perfecto (+\$$currentExtra)'
+                      : 'Me parece perfecto (Sin extra)'),
+                  backgroundColor: const Color(0xFFDBEAFE),
+                  side: const BorderSide(
+                    color: Color(0xFF1D4ED8),
+                    width: 1.5,
                   ),
-                  labelStyle: TextStyle(
+                  labelStyle: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: currentExtra == 50
-                        ? const Color(0xFF0F2B5C)
-                        : const Color(0xFF374151),
+                    color: Color(0xFF0F2B5C),
                   ),
                   onPressed: () {
                     _stopBotSpeaking();
-                    setState(() {
-                      _selectedExtra = 50;
-                      _customExtraController.clear();
-                      _saveCurrentStateToBatchItem();
-                    });
-                    _speakBotDialog(
-                        '¡Excelente $_userName! Queda con 50 pesos de ganancia extra.');
+                    _saveCurrentStateToBatchItem();
+                    if (currentExtra > 0) {
+                      _speakBotDialog(
+                          '¡Excelente $_userName! Queda con $currentExtra pesos de ganancia extra.');
+                    } else {
+                      _speakBotDialog(
+                          '¡Excelente $_userName! Queda sin ganancia extra.');
+                    }
                   },
                 ),
-                ActionChip(
-                  avatar: const Icon(Icons.edit_rounded,
-                      size: 14, color: Color(0xFF2563EB)),
-                  label: const Text('Cámbialo a \$20'),
-                  backgroundColor: currentExtra == 20
-                      ? const Color(0xFFEFF6FF)
-                      : Colors.white,
-                  side: BorderSide(
-                    color: currentExtra == 20
-                        ? const Color(0xFF3B82F6)
-                        : const Color(0xFFD1D5DB),
-                    width: currentExtra == 20 ? 1.5 : 1,
+                if (currentExtra != 0)
+                  ActionChip(
+                    avatar: const Icon(Icons.do_not_disturb_on_outlined,
+                        size: 15, color: Color(0xFFDC2626)),
+                    label: Text('Sin ganancia extra (\$$base10)'),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(
+                      color: Color(0xFFD1D5DB),
+                      width: 1,
+                    ),
+                    labelStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF374151),
+                    ),
+                    onPressed: () {
+                      _stopBotSpeaking();
+                      setState(() {
+                        _selectedExtra = 0;
+                        _customExtraController.clear();
+                        _saveCurrentStateToBatchItem();
+                      });
+                      _speakBotDialog(
+                          'De acuerdo $_userName, queda sin ganancia extra.');
+                    },
                   ),
-                  labelStyle: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: currentExtra == 20
-                        ? const Color(0xFF1E40AF)
-                        : const Color(0xFF374151),
+                if (currentExtra != 20)
+                  ActionChip(
+                    avatar: const Icon(Icons.edit_rounded,
+                        size: 14, color: Color(0xFF2563EB)),
+                    label: const Text('Cámbialo a \$20'),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(
+                      color: Color(0xFFD1D5DB),
+                      width: 1,
+                    ),
+                    labelStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF374151),
+                    ),
+                    onPressed: () {
+                      _stopBotSpeaking();
+                      setState(() {
+                        _selectedExtra = 20;
+                        _customExtraController.clear();
+                        _saveCurrentStateToBatchItem();
+                      });
+                      _speakBotDialog(
+                          'Listo $_userName, cambié la ganancia extra a 20 pesos.');
+                    },
                   ),
-                  onPressed: () {
-                    _stopBotSpeaking();
-                    setState(() {
-                      _selectedExtra = 20;
-                      _customExtraController.clear();
-                      _saveCurrentStateToBatchItem();
-                    });
-                    _speakBotDialog(
-                        'Listo $_userName, cambié la ganancia extra a 20 pesos.');
-                  },
-                ),
-                ActionChip(
-                  avatar: const Icon(Icons.edit_rounded,
-                      size: 14, color: Color(0xFF2563EB)),
-                  label: const Text('Cámbialo a \$30'),
-                  backgroundColor: currentExtra == 30
-                      ? const Color(0xFFEFF6FF)
-                      : Colors.white,
-                  side: BorderSide(
-                    color: currentExtra == 30
-                        ? const Color(0xFF3B82F6)
-                        : const Color(0xFFD1D5DB),
-                    width: currentExtra == 30 ? 1.5 : 1,
+                if (currentExtra != 30)
+                  ActionChip(
+                    avatar: const Icon(Icons.edit_rounded,
+                        size: 14, color: Color(0xFF2563EB)),
+                    label: const Text('Cámbialo a \$30'),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(
+                      color: Color(0xFFD1D5DB),
+                      width: 1,
+                    ),
+                    labelStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF374151),
+                    ),
+                    onPressed: () {
+                      _stopBotSpeaking();
+                      setState(() {
+                        _selectedExtra = 30;
+                        _customExtraController.clear();
+                        _saveCurrentStateToBatchItem();
+                      });
+                      _speakBotDialog(
+                          'Listo $_userName, cambié la ganancia extra a 30 pesos.');
+                    },
                   ),
-                  labelStyle: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: currentExtra == 30
-                        ? const Color(0xFF1E40AF)
-                        : const Color(0xFF374151),
+                if (currentExtra != 50)
+                  ActionChip(
+                    avatar: const Icon(Icons.edit_rounded,
+                        size: 14, color: Color(0xFF2563EB)),
+                    label: const Text('Cámbialo a \$50'),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(
+                      color: Color(0xFFD1D5DB),
+                      width: 1,
+                    ),
+                    labelStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF374151),
+                    ),
+                    onPressed: () {
+                      _stopBotSpeaking();
+                      setState(() {
+                        _selectedExtra = 50;
+                        _customExtraController.clear();
+                        _saveCurrentStateToBatchItem();
+                      });
+                      _speakBotDialog(
+                          'Listo $_userName, cambié la ganancia extra a 50 pesos.');
+                    },
                   ),
-                  onPressed: () {
-                    _stopBotSpeaking();
-                    setState(() {
-                      _selectedExtra = 30;
-                      _customExtraController.clear();
-                      _saveCurrentStateToBatchItem();
-                    });
-                    _speakBotDialog(
-                        'Listo $_userName, cambié la ganancia extra a 30 pesos.');
-                  },
-                ),
-                ActionChip(
-                  avatar: const Icon(Icons.do_not_disturb_on_outlined,
-                      size: 15, color: Color(0xFFDC2626)),
-                  label: Text('Sin ganancia extra (\$$base10)'),
-                  backgroundColor: currentExtra == 0
-                      ? const Color(0xFFFEE2E2)
-                      : Colors.white,
-                  side: BorderSide(
-                    color: currentExtra == 0
-                        ? const Color(0xFFDC2626)
-                        : const Color(0xFFD1D5DB),
-                    width: currentExtra == 0 ? 1.5 : 1,
-                  ),
-                  labelStyle: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: currentExtra == 0
-                        ? const Color(0xFF991B1B)
-                        : const Color(0xFF374151),
-                  ),
-                  onPressed: () {
-                    _stopBotSpeaking();
-                    setState(() {
-                      _selectedExtra = 0;
-                      _customExtraController.clear();
-                      _saveCurrentStateToBatchItem();
-                    });
-                    _speakBotDialog(
-                        'De acuerdo $_userName, queda sin ganancia extra.');
-                  },
-                ),
                 ActionChip(
                   avatar: const Icon(Icons.share_rounded,
                       size: 15, color: Color(0xFF0F2B5C)),
