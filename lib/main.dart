@@ -813,8 +813,9 @@ Reglas:
     final int extraPesos = _selectedExtra ?? 50;
     final int finalPriceTotal = base10Price + extraPesos;
 
-    final String sizesText =
-        _selectedSizes.isNotEmpty ? ' en tallas $_sizesFormatted' : '';
+    final String sizesText = _selectedSizes.isNotEmpty
+        ? ' en tallas $_sizesFormatted'
+        : ' con la frase pregunta por tallas disponibles';
 
     final String prevPart = prevPrice > 0
         ? 'Su precio anterior es de $prevPrice pesos. '
@@ -1865,7 +1866,7 @@ Reglas estrictas:
   Si hay varios, SIEMPRE extrae el precio de promoción más bajo ('Promo M' o 'Exclusivo Online'). Si no hay ningún precio de promo o exclusivo online, usa el mismo valor de precio_socio.
 - "tipo_promo": 'Exclusivo Online' si la promoción dice 'Exclusivo Online', 'Promo M' si dice 'Promo M', o el nombre de la promo detectada. Si no hay promo, pon "".
 - "tallas_agotadas_tachadas": lista de strings con las tallas que tienen una LÍNEA DIAGONAL cruzando el recuadro (slash '/' o tachón diagonal) indicando que NO hay existencias (ej. si el recuadro de "22.0" está cruzado por una línea diagonal, pon ["22.0"]). Si ninguna tiene línea diagonal, pon [].
-- "tallas": lista de strings ÚNICAMENTE de las tallas DISPONIBLES y limpias que NO tienen línea diagonal cruzándolas. (Quita el ".0", ej. si "22.0" tiene una línea diagonal y "23.0", "24.0", "25.0", "26.0" están limpias, devuelve ["23", "24", "25", "26"]). ¡NUNCA incluyas en "tallas" un recuadro que tenga una raya diagonal o esté tachado!
+- "tallas": lista de strings ÚNICAMENTE de las tallas DISPONIBLES y limpias que NO tienen línea diagonal cruzándolas. (Quita el ".0", ej. si "22.0" tiene una línea diagonal y "23.0", "24.0", "25.0", "26.0" están limpias, devuelve ["23", "24", "25", "26"]). ¡NUNCA incluyas en "tallas" un recuadro que tenga una raya diagonal o esté tachado! Si todas las tallas visibles están tachadas con línea diagonal o no hay tallas disponibles a la vista, devuelve [].
 - "box_2d": arreglo de 4 enteros [ymin, xmin, ymax, xmax] en escala de 0 a 1000 que encierran ÚNICAMENTE la fotografía del producto (el zapato, sandalia, tenis, bota o prenda). No incluyas la barra superior de búsqueda ("Buscar producto por ID"), ni el icono de compartir, ni el texto de "usuarios están viendo este producto", ni los puntos del carrusel, ni los textos de abajo. Si en la imagen NO aparece la foto del producto (solo texto), devuelve [].
 ¡REGLA DE ORO!: NUNCA tomes el valor de 'Al público' ni números de pagos semanales (CrediPrice). El costo de compra activo es SIEMPRE el precio de promoción ('Promo M' o 'Exclusivo Online'); si no existe ninguno de estos dos, toma 'Socio'.
 ''';
@@ -2490,20 +2491,18 @@ Reglas estrictas:
         ? '$productLabel $category'
         : productLabel;
 
+    final String sizesClause = _selectedSizes.isNotEmpty
+        ? 'tallas $_sizesFormatted'
+        : 'pregunta por tallas disponibles';
+
     if (_previousPrice != null && _previousPrice! > 0) {
       final int prev = _previousPrice!.toInt();
       final int promo = _finalPrice.toInt();
-      if (_selectedSizes.isNotEmpty) {
-        return '$title precio anterior \$$prev precio de oferta \$$promo tallas $_sizesFormatted';
-      }
-      return '$title precio anterior \$$prev precio de oferta \$$promo';
+      return '$title precio anterior \$$prev precio de oferta \$$promo $sizesClause';
     }
 
     final int price = _finalPrice.toInt();
-    if (_selectedSizes.isNotEmpty) {
-      return '$title precio de oferta \$$price tallas $_sizesFormatted';
-    }
-    return '$title precio de oferta \$$price';
+    return '$title precio de oferta \$$price $sizesClause';
   }
 
   void _clearAndFocusCost() {
@@ -5654,7 +5653,7 @@ Reglas estrictas:
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      hasSizes ? _sizesFormatted : 'Opcional',
+                      hasSizes ? _sizesFormatted : 'Pregunta por tallas',
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12.5,
