@@ -590,7 +590,7 @@ Reglas:
     return '¡Hola Sofía! Terminé el escaneo. Extraje unos $title$sizesText. '
         '${prevPart}El precio base sin ganancia extra es de $base10Price pesos, '
         'y tengo la idea de agregarle esta ganancia extra de $extraPesos pesos para que quede en $finalPriceTotal pesos. '
-        '¿Te parece perfecto, o se lo cambiamos a 20 pesos o sin ganancia extra?';
+        '¿Te parece perfecto, se lo cambiamos a 20 pesos, o si ya te gusta solo dime "compártelo" para abrir WhatsApp?';
   }
 
   Future<void> _triggerSofiaAssistantGreeting() async {
@@ -628,9 +628,10 @@ Reglas:
           }
         },
         listenOptions: stt.SpeechListenOptions(
-          listenFor: const Duration(seconds: 7),
-          pauseFor: const Duration(seconds: 2),
-          cancelOnError: true,
+          listenFor: const Duration(seconds: 14),
+          pauseFor: const Duration(seconds: 4),
+          cancelOnError: false,
+          partialResults: true,
           localeId: 'es_MX',
         ),
       );
@@ -643,7 +644,32 @@ Reglas:
     final lower = rawSpeech.toLowerCase().trim();
     if (lower.isEmpty) return;
 
-    // 1. Aprobación: "me parece perfecto", "sí", "así déjalo", "está bien", "perfecto"
+    // 1. Comando directo para compartir en WhatsApp: "compártelo", "compartir", "mándalo", "subir al estado", "envíalo"
+    if (lower.contains('compártelo') ||
+        lower.contains('compartelo') ||
+        lower.contains('compartir') ||
+        lower.contains('mándalo') ||
+        lower.contains('mandalo') ||
+        lower.contains('envíalo') ||
+        lower.contains('envialo') ||
+        lower.contains('subir al estado') ||
+        lower.contains('ponlo en el estado') ||
+        lower.contains('a whatsapp')) {
+      _speech.stop();
+      setState(() {
+        _isListeningToSofiaResponse = false;
+        _saveCurrentStateToBatchItem();
+      });
+      _speakBotDialog('¡Abriendo WhatsApp para tu Estado, Sofía!');
+      Future.delayed(const Duration(milliseconds: 1400), () {
+        if (mounted) {
+          _shareOnWhatsAppStatus();
+        }
+      });
+      return;
+    }
+
+    // 2. Aprobación: "me parece perfecto", "sí", "así déjalo", "está bien", "perfecto"
     if (lower.contains('perfecto') ||
         lower.contains('me parece') ||
         lower.contains('así déjalo') ||
@@ -654,19 +680,20 @@ Reglas:
         lower.contains('de acuerdo') ||
         lower == 'sí' ||
         lower == 'si' ||
-        lower.contains('compártelo') ||
-        lower.contains('compartelo')) {
+        lower.contains('así está bien') ||
+        lower.contains('asi esta bien')) {
       _speech.stop();
       setState(() {
         _isListeningToSofiaResponse = false;
         _selectedExtra = _selectedExtra ?? 50;
         _saveCurrentStateToBatchItem();
       });
-      _speakBotDialog('¡Excelente Sofía! Todo listo para compartir en WhatsApp.');
+      _speakBotDialog(
+          '¡Excelente Sofía! Quedó con 50 pesos de ganancia extra. Dime "compártelo" cuando quieras abrir WhatsApp.');
       return;
     }
 
-    // 2. Sin ganancia / sin extra
+    // 3. Sin ganancia / sin extra
     if (lower.contains('sin ganancia') ||
         lower.contains('sin extra') ||
         lower.contains('quitar ganancia') ||
@@ -683,12 +710,12 @@ Reglas:
         _saveCurrentStateToBatchItem();
       });
       _speakBotDialog(
-          'Entendido Sofía, se queda sin ganancia extra, a ${_basePriceRoundedTo10.toInt()} pesos.');
+          'Entendido Sofía, se queda sin ganancia extra, a ${_basePriceRoundedTo10.toInt()} pesos. Dime "compártelo" para abrir WhatsApp.');
       return;
     }
 
-    // 3. Cantidades específicas mencionadas por voz (ej. 20 pesos, 30 pesos, 10, 40)
-    final RegExp numReg = RegExp(r'\b(10|20|30|40|50|60|15|25|35)\b');
+    // 4. Cantidades específicas mencionadas por voz (ej. 20 pesos, 30 pesos, 10, 40)
+    final RegExp numReg = RegExp(r'\b(10|20|30|40|50|60|15|25|35|70|80|100)\b');
     final match = numReg.firstMatch(lower);
     if (match != null) {
       final int amount = int.parse(match.group(1)!);
@@ -701,17 +728,77 @@ Reglas:
       });
       final int newTotal = _basePriceRoundedTo10.toInt() + amount;
       _speakBotDialog(
-          'Listo Sofía, cambié la ganancia extra a $amount pesos. Total: $newTotal pesos.');
+          'Listo Sofía, cambié la ganancia extra a $amount pesos. Total: $newTotal pesos. Dime "compártelo" para abrir WhatsApp.');
       return;
     }
 
-    // 4. Si pide repetir
+    // 5. Preguntas sobre el producto o la tienda (Base de conocimiento interactiva con Gemini)
+    if (lower.length > 5 &&
+        !lower.contains('repite') &&
+        !lower.contains('otra vez')) {
+      _speech.stop();
+      setState(() {
+        _isListeningToSofiaResponse = false;
+      });
+      _answerSofiaQuestionWithKnowledge(rawSpeech);
+      return;
+    }
+
+    // 6. Si pide repetir
     if (lower.contains('repite') ||
         lower.contains('otra vez') ||
         lower.contains('no escuché') ||
         lower.contains('no escuche')) {
       _triggerSofiaAssistantGreeting();
       return;
+    }
+  }
+
+  Future<void> _answerSofiaQuestionWithKnowledge(String userQuestion) async {
+    final String productLabel = _shortProductTypeLabel;
+    final String category = _selectedCategory ?? 'Dama';
+    final int prevPrice = _previousPrice?.toInt() ?? 0;
+    final int base10Price = _basePriceRoundedTo10.toInt();
+    final int extraPesos = _selectedExtra ?? 50;
+    final int finalPriceTotal = base10Price + extraPesos;
+    final String sizesText =
+        _selectedSizes.isNotEmpty ? _sizesFormatted : 'No especificadas';
+    final String brandText = _selectedBrand ?? 'No detectada';
+
+    final String knowledgePrompt = '''
+Eres el asistente personal inteligente y cariñoso de Sofía, quien vende calzado y ropa por catálogo de Price Shoes en México.
+Responde directamente a la pregunta o comentario de Sofía en un máximo de 2 oraciones, de forma natural, cálida y útil.
+Al final recuérdale que si gusta puede decir "compártelo" para abrir WhatsApp, o pedir cambiar la ganancia extra.
+
+Contexto del producto actual que Sofía está revisando:
+- Artículo: $productLabel de $category
+- Marca: $brandText
+- Tallas disponibles: $sizesText
+- Precio anterior: \$$prevPrice
+- Precio base sin extra (con su 50% de ganancia): \$$base10Price
+- Ganancia extra actual: +\$$extraPesos
+- Precio final de venta al público: \$$finalPriceTotal
+- Ganancia total estimada de Sofía: \$${_totalProfit.toInt()}
+
+Pregunta de Sofía: "$userQuestion"
+''';
+
+    try {
+      final response = await _callGeminiWithFallback([
+        Content.text(knowledgePrompt),
+      ]);
+      final String? answer = response.text?.trim();
+      if (answer != null && answer.isNotEmpty && mounted) {
+        setState(() {
+          _botDialogText = answer;
+        });
+        await _speakBotDialog(answer);
+      }
+    } catch (_) {
+      if (mounted) {
+        _speakBotDialog(
+            'Te escuché Sofía. Si quieres cambiar la ganancia solo dime la cantidad o dime "compártelo" para abrir WhatsApp.');
+      }
     }
   }
 
@@ -3071,6 +3158,25 @@ Reglas estrictas:
                     });
                     _speakBotDialog(
                         'De acuerdo Sofía, queda sin ganancia extra.');
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.share_rounded,
+                      size: 15, color: Color(0xFF15803D)),
+                  label: const Text('📲 Compártelo en WhatsApp'),
+                  backgroundColor: const Color(0xFFDCFCE7),
+                  side: const BorderSide(
+                    color: Color(0xFF16A34A),
+                    width: 1.5,
+                  ),
+                  labelStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF14532D),
+                  ),
+                  onPressed: () {
+                    _stopBotSpeaking();
+                    _shareOnWhatsAppStatus();
                   },
                 ),
               ],
