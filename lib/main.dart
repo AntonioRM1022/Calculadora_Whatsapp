@@ -175,6 +175,8 @@ Reglas:
   bool _isBotSpeaking = false;
   bool _isListeningToSofiaResponse = false;
   bool _autoListenAfterCurrentSpeech = false;
+  bool _isExecutingVoiceAction = false;
+  bool _isSharingInProgress = false;
   String _sofiaSpokenResponse = '';
   String? _botDialogText;
 
@@ -598,6 +600,11 @@ Reglas:
   }) async {
     _autoListenAfterCurrentSpeech = autoListenAfter;
     final String cleanText = _cleanTextForSpeech(text);
+    if (mounted) {
+      setState(() {
+        _botDialogText = cleanText;
+      });
+    }
     try {
       await _speech.stop();
       if (_isListeningToSofiaResponse) {
@@ -636,7 +643,7 @@ Reglas:
     return '¡Hola Sofía! Terminé el escaneo. Extraje unos $title$sizesText. '
         '${prevPart}El precio base sin ganancia extra es de $base10Price pesos, '
         'y tengo la idea de agregarle esta ganancia extra de $extraPesos pesos para que quede en $finalPriceTotal pesos. '
-        '¿Te parece perfecto, se lo cambiamos a 20 pesos, o si ya te gusta solo dime "compártelo" para abrir WhatsApp?';
+        '¿Te parece perfecto, o gustas cambiarlo a uno diferente? Y si ya te gusta solo dime "compártelo" para abrir WhatsApp.';
   }
 
   Future<void> _triggerSofiaAssistantGreeting() async {
@@ -657,6 +664,7 @@ Reglas:
     }
 
     try {
+      _isExecutingVoiceAction = false;
       setState(() {
         _isListeningToSofiaResponse = true;
         _sofiaSpokenResponse = 'Te escucho Sofía...';
@@ -685,6 +693,7 @@ Reglas:
   }
 
   void _processSofiaVoiceCommand(String rawSpeech, {required bool isFinal}) {
+    if (_isExecutingVoiceAction || _isSharingInProgress) return;
     final lower = rawSpeech.toLowerCase().trim();
     if (lower.isEmpty) return;
 
@@ -699,13 +708,14 @@ Reglas:
         lower.contains('subir al estado') ||
         lower.contains('ponlo en el estado') ||
         lower.contains('a whatsapp')) {
+      _isExecutingVoiceAction = true;
       _speech.stop();
       setState(() {
         _isListeningToSofiaResponse = false;
         _saveCurrentStateToBatchItem();
       });
       _speakBotDialog('¡Abriendo WhatsApp para tu Estado, Sofía!', autoListenAfter: false);
-      Future.delayed(const Duration(milliseconds: 1300), () {
+      Future.delayed(const Duration(milliseconds: 900), () {
         if (mounted) {
           _shareOnWhatsAppStatus();
         }
@@ -726,6 +736,7 @@ Reglas:
         lower == 'si' ||
         lower.contains('así está bien') ||
         lower.contains('asi esta bien')) {
+      _isExecutingVoiceAction = true;
       _speech.stop();
       setState(() {
         _isListeningToSofiaResponse = false;
@@ -747,6 +758,7 @@ Reglas:
         lower.contains('quitale') ||
         lower.contains('cero') ||
         lower.contains('ninguna')) {
+      _isExecutingVoiceAction = true;
       _speech.stop();
       setState(() {
         _isListeningToSofiaResponse = false;
@@ -764,6 +776,7 @@ Reglas:
     final RegExp numReg = RegExp(r'\b(10|20|30|40|50|60|15|25|35|70|80|100)\b');
     final match = numReg.firstMatch(lower);
     if (match != null) {
+      _isExecutingVoiceAction = true;
       final int amount = int.parse(match.group(1)!);
       _speech.stop();
       setState(() {
@@ -784,12 +797,14 @@ Reglas:
         lower.contains('otra vez') ||
         lower.contains('no escuché') ||
         lower.contains('no escuche')) {
+      _isExecutingVoiceAction = true;
       _triggerSofiaAssistantGreeting();
       return;
     }
 
     // 6. Base de conocimiento: ÚNICAMENTE cuando isFinal es verdadero (terminó de hablar)
     if (isFinal && lower.length > 3) {
+      _isExecutingVoiceAction = true;
       _speech.stop();
       setState(() {
         _isListeningToSofiaResponse = false;
@@ -2822,27 +2837,12 @@ Reglas estrictas:
   }
 
   Future<void> _shareOnWhatsAppStatus() async {
-    final String shareText = _generatedOfferMessage;
+    if (_isSharingInProgress) return;
+    _isSharingInProgress = true;
 
-    if (_selectedImage != null) {
-      await _addOfferToHistory();
-      await Share.shareXFiles(
-        [_selectedImage!],
-        text: shareText,
-      );
-      _handlePostShareBatchAdvance();
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Elige una foto de la galería para compartir.'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      setState(() {
-        _activeStep = 6;
-      });
-      await _pickPhotoFromGallery();
+    try {
+      final String shareText = _generatedOfferMessage;
+
       if (_selectedImage != null) {
         await _addOfferToHistory();
         await Share.shareXFiles(
@@ -2850,7 +2850,32 @@ Reglas estrictas:
           text: shareText,
         );
         _handlePostShareBatchAdvance();
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Elige una foto de la galería para compartir.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        setState(() {
+          _activeStep = 6;
+        });
+        await _pickPhotoFromGallery();
+        if (_selectedImage != null) {
+          await _addOfferToHistory();
+          await Share.shareXFiles(
+            [_selectedImage!],
+            text: shareText,
+          );
+          _handlePostShareBatchAdvance();
+        }
       }
+    } finally {
+      Future.delayed(const Duration(milliseconds: 2000), () {
+        _isSharingInProgress = false;
+        _isExecutingVoiceAction = false;
+      });
     }
   }
 
