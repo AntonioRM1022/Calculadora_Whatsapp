@@ -1,12 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -165,6 +167,15 @@ Reglas:
   double? _socioPrice;
   double? _promoCost;
   String? _promoLabel;
+  List<_BatchOfferItem> _batchQueue = [];
+  int _currentBatchIndex = 0;
+
+  // Variables para Asistente Conversacional Interactivo (Sofía)
+  late final FlutterTts _tts;
+  bool _isBotSpeaking = false;
+  bool _isListeningToSofiaResponse = false;
+  String _sofiaSpokenResponse = '';
+  String? _botDialogText;
 
   double get _basePriceRoundedTo10 {
     if (_costPrice <= 0) return 0.0;
@@ -376,7 +387,16 @@ Reglas:
   final List<int> _extraOptions = [10, 20, 30, 40, 50];
 
   // Calzado según rangos de Price Shoes por categoría:
-  final List<String> _damaFootwearSizes = ['20', '21', '22', '23', '24', '25'];
+  final List<String> _damaFootwearSizes = [
+    '20',
+    '21',
+    '22',
+    '23',
+    '24',
+    '25',
+    '26',
+    '27',
+  ];
   final List<String> _caballeroFootwearSizes = [
     '25',
     '26',
@@ -494,12 +514,205 @@ Reglas:
     _scrollController = ScrollController();
     _speech = stt.SpeechToText();
     _initSpeech();
+    _initTts();
     _loadDailyUsage();
     _loadHistory();
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3200),
     )..repeat();
+  }
+
+  Future<void> _initTts() async {
+    _tts = FlutterTts();
+    try {
+      await _tts.setLanguage('es-MX');
+      await _tts.setSpeechRate(0.51);
+      await _tts.setPitch(1.0);
+      await _tts.setVolume(1.0);
+
+      _tts.setStartHandler(() {
+        if (mounted) setState(() => _isBotSpeaking = true);
+      });
+
+      _tts.setCompletionHandler(() {
+        if (mounted) {
+          setState(() => _isBotSpeaking = false);
+          _listenToSofiaResponse();
+        }
+      });
+
+      _tts.setCancelHandler(() {
+        if (mounted) setState(() => _isBotSpeaking = false);
+      });
+
+      _tts.setErrorHandler((_) {
+        if (mounted) setState(() => _isBotSpeaking = false);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _speakBotDialog(String text) async {
+    try {
+      await _speech.stop();
+      if (_isListeningToSofiaResponse) {
+        setState(() => _isListeningToSofiaResponse = false);
+      }
+      await _tts.stop();
+      await _tts.speak(text);
+    } catch (_) {}
+  }
+
+  Future<void> _stopBotSpeaking() async {
+    try {
+      await _tts.stop();
+      if (mounted) setState(() => _isBotSpeaking = false);
+    } catch (_) {}
+  }
+
+  String _buildSofiaDialogText() {
+    final String productLabel = _shortProductTypeLabel;
+    final String category = _selectedCategory ?? 'Dama';
+    final String title = '$productLabel de $category';
+
+    final int prevPrice = _previousPrice?.toInt() ?? 0;
+    final int base10Price = _basePriceRoundedTo10.toInt();
+    final int extraPesos = _selectedExtra ?? 50;
+    final int finalPriceTotal = base10Price + extraPesos;
+
+    final String sizesText =
+        _selectedSizes.isNotEmpty ? ' en tallas $_sizesFormatted' : '';
+
+    final String prevPart = prevPrice > 0
+        ? 'Su precio anterior es de $prevPrice pesos. '
+        : '';
+
+    return '¡Hola Sofía! Terminé el escaneo. Extraje unos $title$sizesText. '
+        '${prevPart}El precio base sin ganancia extra es de $base10Price pesos, '
+        'y tengo la idea de agregarle esta ganancia extra de $extraPesos pesos para que quede en $finalPriceTotal pesos. '
+        '¿Te parece perfecto, o se lo cambiamos a 20 pesos o sin ganancia extra?';
+  }
+
+  Future<void> _triggerSofiaAssistantGreeting() async {
+    if (!mounted) return;
+    final String dialog = _buildSofiaDialogText();
+    setState(() {
+      _botDialogText = dialog;
+      _sofiaSpokenResponse = '';
+    });
+    await _speakBotDialog(dialog);
+  }
+
+  Future<void> _listenToSofiaResponse() async {
+    if (!mounted) return;
+    if (!_speechAvailable) {
+      await _initSpeech();
+      if (!_speechAvailable) return;
+    }
+
+    try {
+      setState(() {
+        _isListeningToSofiaResponse = true;
+        _sofiaSpokenResponse = 'Te escucho Sofía...';
+      });
+
+      await _speech.listen(
+        onResult: (result) {
+          if (!mounted) return;
+          final String words = result.recognizedWords.trim();
+          setState(() {
+            _sofiaSpokenResponse = words;
+          });
+          if (result.finalResult || words.isNotEmpty) {
+            _processSofiaVoiceCommand(words);
+          }
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenFor: const Duration(seconds: 7),
+          pauseFor: const Duration(seconds: 2),
+          cancelOnError: true,
+          localeId: 'es_MX',
+        ),
+      );
+    } catch (_) {
+      if (mounted) setState(() => _isListeningToSofiaResponse = false);
+    }
+  }
+
+  void _processSofiaVoiceCommand(String rawSpeech) {
+    final lower = rawSpeech.toLowerCase().trim();
+    if (lower.isEmpty) return;
+
+    // 1. Aprobación: "me parece perfecto", "sí", "así déjalo", "está bien", "perfecto"
+    if (lower.contains('perfecto') ||
+        lower.contains('me parece') ||
+        lower.contains('así déjalo') ||
+        lower.contains('asi dejalo') ||
+        lower.contains('está bien') ||
+        lower.contains('esta bien') ||
+        lower.contains('me late') ||
+        lower.contains('de acuerdo') ||
+        lower == 'sí' ||
+        lower == 'si' ||
+        lower.contains('compártelo') ||
+        lower.contains('compartelo')) {
+      _speech.stop();
+      setState(() {
+        _isListeningToSofiaResponse = false;
+        _selectedExtra = _selectedExtra ?? 50;
+        _saveCurrentStateToBatchItem();
+      });
+      _speakBotDialog('¡Excelente Sofía! Todo listo para compartir en WhatsApp.');
+      return;
+    }
+
+    // 2. Sin ganancia / sin extra
+    if (lower.contains('sin ganancia') ||
+        lower.contains('sin extra') ||
+        lower.contains('quitar ganancia') ||
+        lower.contains('quitar extra') ||
+        lower.contains('quítale') ||
+        lower.contains('quitale') ||
+        lower.contains('cero') ||
+        lower.contains('ninguna')) {
+      _speech.stop();
+      setState(() {
+        _isListeningToSofiaResponse = false;
+        _selectedExtra = 0;
+        _customExtraController.clear();
+        _saveCurrentStateToBatchItem();
+      });
+      _speakBotDialog(
+          'Entendido Sofía, se queda sin ganancia extra, a ${_basePriceRoundedTo10.toInt()} pesos.');
+      return;
+    }
+
+    // 3. Cantidades específicas mencionadas por voz (ej. 20 pesos, 30 pesos, 10, 40)
+    final RegExp numReg = RegExp(r'\b(10|20|30|40|50|60|15|25|35)\b');
+    final match = numReg.firstMatch(lower);
+    if (match != null) {
+      final int amount = int.parse(match.group(1)!);
+      _speech.stop();
+      setState(() {
+        _isListeningToSofiaResponse = false;
+        _selectedExtra = amount;
+        _customExtraController.clear();
+        _saveCurrentStateToBatchItem();
+      });
+      final int newTotal = _basePriceRoundedTo10.toInt() + amount;
+      _speakBotDialog(
+          'Listo Sofía, cambié la ganancia extra a $amount pesos. Total: $newTotal pesos.');
+      return;
+    }
+
+    // 4. Si pide repetir
+    if (lower.contains('repite') ||
+        lower.contains('otra vez') ||
+        lower.contains('no escuché') ||
+        lower.contains('no escuche')) {
+      _triggerSofiaAssistantGreeting();
+      return;
+    }
   }
 
   Future<void> _initSpeech() async {
@@ -537,6 +750,7 @@ Reglas:
 
   @override
   void dispose() {
+    _tts.stop();
     _speech.stop();
     _pulseController.dispose();
     _costController.dispose();
@@ -859,17 +1073,407 @@ Reglas:
   }
 
   // ---------------------------------------------------------------------------
-  // ESCANEO INTELIGENTE DE CAPTURAS DE CATÁLOGO (PRICE SHOES) CON GEMINI VISION
+  // RECORTE AUTOMÁTICO DE LA FOTO DEL PRODUCTO DESDE LA CAPTURA DE PANTALLA
+  // ---------------------------------------------------------------------------
+  Future<XFile?> _cropProductFromScreenshot(
+    Uint8List imageBytes,
+    dynamic rawBox,
+  ) async {
+    try {
+      final ui.Codec codec = await ui.instantiateImageCodec(imageBytes);
+      final ui.FrameInfo frameInfo = await codec.getNextFrame();
+      final ui.Image fullImage = frameInfo.image;
+      final double imgW = fullImage.width.toDouble();
+      final double imgH = fullImage.height.toDouble();
+
+      double? ymin;
+      double? xmin;
+      double? ymax;
+      double? xmax;
+
+      if (rawBox is List && rawBox.length == 4) {
+        final List<double?> nums = rawBox
+            .map((e) => e is num ? e.toDouble() : double.tryParse(e.toString()))
+            .toList();
+        if (nums.every((n) => n != null)) {
+          ymin = nums[0]!;
+          xmin = nums[1]!;
+          ymax = nums[2]!;
+          xmax = nums[3]!;
+          if (ymin <= 1.0 &&
+              xmin <= 1.0 &&
+              ymax <= 1.0 &&
+              xmax <= 1.0 &&
+              ymax > 0) {
+            ymin *= 1000.0;
+            xmin *= 1000.0;
+            ymax *= 1000.0;
+            xmax *= 1000.0;
+          }
+        }
+      }
+
+      if (ymin == null ||
+          xmin == null ||
+          ymax == null ||
+          xmax == null ||
+          ymax <= ymin + 30 ||
+          xmax <= xmin + 30) {
+        return null;
+      }
+
+      // Recorte ceñido al producto para evitar barras superiores o textos
+      const double padY = 10.0;
+      const double padX = 14.0;
+      final double safeYMin = (ymin - padY).clamp(0.0, 1000.0);
+      final double safeXMin = (xmin - padX).clamp(0.0, 1000.0);
+      final double safeYMax = (ymax + padY).clamp(0.0, 1000.0);
+      final double safeXMax = (xmax + padX).clamp(0.0, 1000.0);
+
+      final double left = (safeXMin / 1000.0) * imgW;
+      final double top = (safeYMin / 1000.0) * imgH;
+      final double cropW = ((safeXMax - safeXMin) / 1000.0) * imgW;
+      final double cropH = ((safeYMax - safeYMin) / 1000.0) * imgH;
+
+      if (cropW < 40 || cropH < 40) return null;
+
+      // Lienzo blanco de estudio con proporción estética para WhatsApp
+      final double canvasW = cropW * 1.14;
+      final double canvasH = math.max(cropH * 1.16, canvasW * 0.78);
+      final double offsetX = (canvasW - cropW) / 2.0;
+      final double offsetY = (canvasH - cropH) / 2.0;
+
+      final ui.PictureRecorder recorder = ui.PictureRecorder();
+      final Canvas canvas = Canvas(recorder);
+      final Rect fullCanvasRect = Rect.fromLTWH(0, 0, canvasW, canvasH);
+      final Rect srcRect = Rect.fromLTWH(left, top, cropW, cropH);
+      final Rect dstRect = Rect.fromLTWH(offsetX, offsetY, cropW, cropH);
+
+      canvas.drawRect(fullCanvasRect, Paint()..color = Colors.white);
+      canvas.drawImageRect(
+        fullImage,
+        srcRect,
+        dstRect,
+        Paint()..filterQuality = FilterQuality.high,
+      );
+
+      final ui.Picture picture = recorder.endRecording();
+      final int outW = canvasW.round().clamp(1, 4096);
+      final int outH = canvasH.round().clamp(1, 4096);
+      final ui.Image croppedUiImage = await picture.toImage(outW, outH);
+      final ByteData? pngData = await croppedUiImage.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+      if (pngData == null) return null;
+
+      final String tempPath =
+          '${Directory.systemTemp.path}/producto_ia_${DateTime.now().millisecondsSinceEpoch}.png';
+      final File outFile = File(tempPath);
+      await outFile.writeAsBytes(pngData.buffer.asUint8List(), flush: true);
+      return XFile(outFile.path, mimeType: 'image/png');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GESTIÓN DE LOTES (CARRUSEL DE REVISIÓN Y ENVÍO 1 A 1)
+  // ---------------------------------------------------------------------------
+  void _saveCurrentStateToBatchItem() {
+    if (_batchQueue.isEmpty ||
+        _currentBatchIndex < 0 ||
+        _currentBatchIndex >= _batchQueue.length) {
+      return;
+    }
+    final item = _batchQueue[_currentBatchIndex];
+    item.socioPrice = _socioPrice ?? 0.0;
+    item.promoCost = _promoCost ?? _costPrice;
+    item.promoLabel = _promoLabel;
+    item.costPrice = _costPrice;
+    item.previousPrice = _previousPrice;
+    item.selectedExtra = _selectedExtra;
+    item.productType = _selectedProductType ?? 'Tenis';
+    item.category = _selectedCategory ?? 'Dama';
+    item.brand = _selectedBrand;
+    item.customProductName = _customProductName;
+    item.sizes = List<String>.from(_selectedSizes);
+    item.croppedImage = _selectedImage;
+  }
+
+  void _loadBatchItemToState(int index) {
+    if (index < 0 || index >= _batchQueue.length) return;
+    final item = _batchQueue[index];
+    setState(() {
+      _currentBatchIndex = index;
+      _socioPrice = item.socioPrice;
+      _promoCost = item.promoCost;
+      _promoLabel = item.promoLabel;
+      _costPrice = item.costPrice;
+      _costController.text = _costPrice.toStringAsFixed(2);
+      _previousPrice = item.previousPrice;
+
+      _selectedExtra = item.selectedExtra;
+      if (_selectedExtra != null && _extraOptions.contains(_selectedExtra)) {
+        _customExtraController.clear();
+      } else {
+        _customExtraController.text =
+            (_selectedExtra != null && _selectedExtra! > 0)
+                ? _selectedExtra.toString()
+                : '';
+      }
+      _extraCompleted = true;
+
+      _selectedProductType = item.productType;
+      _selectedCategory = item.category;
+      _selectedBrand = item.brand;
+      _brandController.text = _selectedBrand ?? '';
+      _customProductName = item.customProductName;
+
+      _selectedSizes
+        ..clear()
+        ..addAll(item.sizes);
+      _sizeCompleted = item.sizes.isNotEmpty;
+
+      _selectedImage = item.croppedImage;
+      _photoCompleted = item.croppedImage != null;
+      _costCompleted = true;
+      _productTypeCompleted = true;
+      _categoryCompleted = true;
+      _activeStep = 6;
+    });
+  }
+
+  void _goToBatchItem(int newIndex) {
+    if (newIndex < 0 ||
+        newIndex >= _batchQueue.length ||
+        newIndex == _currentBatchIndex) {
+      return;
+    }
+    _stopBotSpeaking();
+    _saveCurrentStateToBatchItem();
+    _loadBatchItemToState(newIndex);
+    _triggerSofiaAssistantGreeting();
+  }
+
+  void _handlePostShareBatchAdvance() {
+    if (!mounted || _batchQueue.isEmpty) return;
+    _stopBotSpeaking();
+    _saveCurrentStateToBatchItem();
+    setState(() {
+      _batchQueue[_currentBatchIndex].isShared = true;
+    });
+
+    if (_batchQueue.length > 1) {
+      if (_currentBatchIndex < _batchQueue.length - 1) {
+        final int sentNumber = _currentBatchIndex + 1;
+        final int nextIdx = _currentBatchIndex + 1;
+        _loadBatchItemToState(nextIdx);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '¡Oferta $sentNumber enviada! Mostrando oferta ${nextIdx + 1} de ${_batchQueue.length}',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        _triggerSofiaAssistantGreeting();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '¡Excelente! Completaste las ${_batchQueue.length} ofertas del lote.',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<_BatchOfferItem?> _extractSingleCatalogImage(
+    XFile pickedFile,
+    String catalogPrompt,
+  ) async {
+    final imageBytes = await pickedFile.readAsBytes();
+    final content = [
+      Content.multi([
+        TextPart(catalogPrompt),
+        DataPart('image/jpeg', imageBytes),
+      ]),
+    ];
+
+    final response = await _callGeminiWithFallback(content);
+    final rawText = response.text ?? '';
+    if (rawText.isEmpty) return null;
+
+    final cleanedJson = rawText
+        .replaceAll('```json', '')
+        .replaceAll('```', '')
+        .trim();
+    final decoded = jsonDecode(cleanedJson);
+    if (decoded is! Map<String, dynamic>) return null;
+
+    final double socio = (decoded['precio_socio'] is num)
+        ? (decoded['precio_socio'] as num).toDouble()
+        : (double.tryParse(
+                decoded['precio_socio']?.toString().replaceAll(',', '') ??
+                    '') ??
+            0.0);
+
+    final double promo = (decoded['precio_promo'] is num)
+        ? (decoded['precio_promo'] as num).toDouble()
+        : (double.tryParse(
+                decoded['precio_promo']?.toString().replaceAll(',', '') ??
+                    '') ??
+            socio);
+
+    final String? tipoRaw = decoded['tipo']?.toString().toLowerCase();
+    final String? catRaw = decoded['categoria']?.toString().toLowerCase();
+    final String? nombreRaw = decoded['nombre_producto']?.toString();
+    final String? marcaRaw = decoded['marca']?.toString();
+
+    final double normalCalc = ((socio * 1.5) / 50.0).ceil() * 50.0;
+    final double activeCost = promo > 0 ? promo : socio;
+    // Sugerencia inicial por defecto de 50 pesos de ganancia extra
+    const int extraDiff = 50;
+
+    String detectedType = 'Tenis';
+    final nameLower = (nombreRaw ?? '').toLowerCase();
+    final typeLower = (tipoRaw ?? '').toLowerCase();
+    final marcaLower = (marcaRaw ?? '').toLowerCase();
+
+    String detectedBrand = '';
+    if (marcaRaw != null &&
+        marcaRaw.trim().isNotEmpty &&
+        marcaLower != 'null') {
+      detectedBrand = marcaRaw.trim();
+    } else {
+      final commonBrands = [
+        'Shosh', 'Goodyear', 'Nike', 'Adidas', 'Puma', 'Pirma', 'Charly',
+        'Converse', 'Vans', 'Reebok', 'Flexi', 'Skechers', 'Under Armour',
+        'Jordan', 'Fila', 'Levis', 'Champion', 'K-Swiss', 'DC',
+        'Timberland', 'Crocs', 'Panam', 'Perry Ellis', 'Discovery',
+        'SwissBrand', 'Lee', 'Wrangler', 'Aeropostale', 'Andrea',
+        'Cklass', 'Terra', 'Impuls', 'Vazza'
+      ];
+      for (final b in commonBrands) {
+        if (nameLower.contains(b.toLowerCase())) {
+          detectedBrand = b;
+          break;
+        }
+      }
+    }
+
+    if (typeLower.contains('prenda') ||
+        typeLower.contains('ropa') ||
+        nameLower.contains('blusa') ||
+        nameLower.contains('playera') ||
+        nameLower.contains('pantalon') ||
+        nameLower.contains('sueter') ||
+        nameLower.contains('vestido') ||
+        nameLower.contains('chamarra')) {
+      detectedType = 'Prenda';
+    } else if (typeLower.contains('tenis') ||
+        typeLower.contains('tennis') ||
+        nameLower.contains('tenis') ||
+        nameLower.contains('tennis') ||
+        nameLower.contains('sneaker') ||
+        nameLower.contains('running')) {
+      detectedType = 'Tenis';
+    } else {
+      detectedType = 'Calzado';
+    }
+
+    String detectedCat = 'Dama';
+    if (catRaw != null) {
+      final c = catRaw.trim().toLowerCase();
+      if (c.contains('caballero') || c.contains('hombre')) {
+        detectedCat = 'Caballero';
+      } else if (c.contains('niña') || c.contains('nina')) {
+        detectedCat = 'Niña';
+      } else if (c.contains('niño') ||
+          c.contains('nino') ||
+          c.contains('infantil')) {
+        detectedCat = 'Niño';
+      } else if (c.contains('junior')) {
+        detectedCat = 'Juniors';
+      } else if (c.contains('teen')) {
+        detectedCat = 'Teens';
+      } else if (c.contains('beba')) {
+        detectedCat = 'Beba';
+      } else if (c.contains('bebe') ||
+          c.contains('bebé') ||
+          c.contains('maternal')) {
+        detectedCat = 'Bebé';
+      } else if (c.contains('unisex')) {
+        detectedCat = 'Unisex';
+      } else if (c.contains('dama') || c.contains('mujer')) {
+        detectedCat = 'Dama';
+      }
+    }
+
+    final List<dynamic>? rawSizes = decoded['tallas'] as List<dynamic>?;
+    final List<String> parsedSizes = rawSizes
+            ?.map((e) {
+              String s = e.toString().trim();
+              if (s.endsWith('.0')) {
+                s = s.substring(0, s.length - 2);
+              }
+              return s;
+            })
+            .where((s) => s.isNotEmpty)
+            .toList() ??
+        [];
+
+    final String? tipoPromoRaw = decoded['tipo_promo']?.toString();
+    String detectedPromoLabel = 'Promo M';
+    if (tipoPromoRaw != null && tipoPromoRaw.trim().isNotEmpty) {
+      final lower = tipoPromoRaw.toLowerCase();
+      if (lower.contains('online') || lower.contains('exclusivo')) {
+        detectedPromoLabel = 'Exclusivo Online';
+      } else if (lower.contains('temporada')) {
+        detectedPromoLabel = 'Dto. Temporada';
+      } else if (lower.contains('promo')) {
+        detectedPromoLabel = 'Promo M';
+      } else {
+        detectedPromoLabel = tipoPromoRaw.trim();
+      }
+    }
+
+    final XFile? croppedProductPhoto = await _cropProductFromScreenshot(
+      imageBytes,
+      decoded['box_2d'] ?? decoded['recorte_producto'],
+    );
+
+    return _BatchOfferItem(
+      socioPrice: socio,
+      promoCost: promo,
+      promoLabel: (promo > 0 && promo != socio) ? detectedPromoLabel : null,
+      costPrice: activeCost,
+      previousPrice: normalCalc > 0 ? normalCalc : null,
+      selectedExtra: extraDiff,
+      productType: detectedType,
+      category: detectedCat,
+      brand: detectedBrand.isNotEmpty ? detectedBrand : null,
+      customProductName: (nombreRaw != null && nombreRaw.trim().isNotEmpty)
+          ? nombreRaw.trim()
+          : null,
+      sizes: parsedSizes,
+      croppedImage: croppedProductPhoto,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // ESCANEO INTELIGENTE (1 CAPTURA O LOTE DE CAPTURAS) CON GEMINI VISION
   // ---------------------------------------------------------------------------
   Future<void> _scanCatalogScreenshot() async {
     FocusScope.of(context).unfocus();
-    final XFile? pickedFile = await _picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1080,
-      maxHeight: 1920,
-      imageQuality: 75,
+    final List<XFile> pickedFiles = await _picker.pickMultiImage(
+      maxWidth: 1200,
+      maxHeight: 2400,
+      imageQuality: 85,
     );
-    if (pickedFile == null) return;
+    if (pickedFiles.isEmpty) return;
 
     if (_geminiApiKey.isEmpty) {
       if (!mounted) return;
@@ -883,248 +1487,134 @@ Reglas:
       return;
     }
 
+    final int totalFiles = pickedFiles.length;
     setState(() {
       _isScanningImage = true;
       _isProcessingAI = true;
       _isAutoClosing = false;
-      _scanStatusMessage = 'Leyendo catálogo Price Shoes con IA...';
+      _scanStatusMessage = totalFiles > 1
+          ? 'Procesando captura 1 de $totalFiles con IA...'
+          : 'Extrayendo datos y recortando foto con IA...';
     });
 
-    try {
-      const String catalogPrompt = '''
+    const String catalogPrompt = '''
 Eres un asistente experto para extraer ofertas de capturas de pantalla de catálogos como Price Shoes y tiendas de calzado/ropa.
 Analiza detenidamente la imagen y devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
 {
-  "marca": "Goodyear",
-  "nombre_producto": "Tenis Casual Goodyear",
-  "tipo": "tenis",
-  "categoria": "caballero",
-  "precio_socio": 699,
-  "precio_promo": 440,
-  "tipo_promo": "Exclusivo Online",
-  "tallas": []
+  "marca": "Shosh",
+  "nombre_producto": "Sandalia Confort",
+  "tipo": "calzado",
+  "categoria": "dama",
+  "precio_socio": 349,
+  "precio_promo": 279,
+  "tipo_promo": "Promo M",
+  "tallas": ["23", "24", "25", "26"],
+  "box_2d": [120, 60, 380, 940]
 }
 Reglas estrictas:
-- "marca": Nombre de la marca que aparece en la parte superior o en el nombre (ej. "Goodyear", "Nike", "Adidas", "Puma", "Pirma", "Charly", "Flexi", "Converse", "Vans", "Skechers", "Reebok", "Levis", etc.). Si no hay marca visible, pon "".
-- "nombre_producto": Nombre completo del artículo o marca visible (ej. "Tenis Casual", "Tenis Para Correr Nike Stellar Ride (GS)", etc.).
-- "tipo": 'tenis' (si son tenis, zapatillas deportivas o sneakers), 'calzado' (si son zapatos, botas, sandalias, tacones, pantuflas) o 'prenda' (si es ropa, blusa, playera, suéter, pantalón, etc.).
+- "marca": Nombre de la marca que aparece en la parte superior o en el nombre (ej. "Shosh", "Goodyear", "Nike", "Adidas", "Puma", "Pirma", "Charly", "Flexi", "Converse", "Vans", "Skechers", "Reebok", "Levis", etc.). Si no hay marca visible, pon "".
+- "nombre_producto": Nombre completo del artículo o marca visible (ej. "Sandalia Confort", "Tenis Casual", "Tenis Para Correr Nike Stellar Ride (GS)", etc.).
+- "tipo": 'tenis' (si son tenis, zapatillas deportivas o sneakers), 'calzado' (si son zapatos, botas, sandalias, huaraches, tacones, pantuflas) o 'prenda' (si es ropa, blusa, playera, suéter, pantalón, etc.).
 - "categoria": Extrae exactamente la categoría o público que aparece en el catálogo tal cual sale: 'dama', 'caballero', 'niño', 'niña', 'juniors', 'teens', 'bebe', 'beba' o 'unisex'. (Si dice CABALLERO, pon 'caballero'; si dice DAMA, 'dama'; si dice JUNIORS o juniors, pon 'juniors'; si dice TEENS, 'teens'; etc.).
-- "precio_socio": número exacto que acompaña a la palabra 'Socio' (ej. en 'Socio: \$699' o 'Socio: \$1,249', extrae 699 o 1249). ¡IGNORA POR COMPLETO 'Al público'!.
+- "precio_socio": número exacto que acompaña a la palabra 'Socio' (ej. en 'Socio: \$349' o 'Socio: \$1,249', extrae 349 o 1249). ¡IGNORA POR COMPLETO 'Al público'!.
 - "precio_promo": número exacto del precio especial o promoción que aparece en color magenta/rosa/morado o destacado, tal como:
   * 'Exclusivo Online' (ej. en 'Exclusivo Online: \$440' o badge 'EXCLUSIVO ONLINE', extrae 440).
-  * 'Promo M' (ej. en 'Promo M:\$1,124', extrae 1124).
+  * 'Promo M' (ej. en 'Promo M: \$279' o 'Promo M:\$1,124', extrae 279 o 1124).
   * 'Dto. de temporada' (si no hay Promo M ni Exclusivo Online, ej. 'Dto. de temporada: \$629' extrae 629).
   Si hay varios, SIEMPRE extrae el precio de promoción más bajo ('Promo M' o 'Exclusivo Online'). Si no hay ningún precio de promo o exclusivo online, usa el mismo valor de precio_socio.
 - "tipo_promo": 'Exclusivo Online' si la promoción dice 'Exclusivo Online', 'Promo M' si dice 'Promo M', o el nombre de la promo detectada. Si no hay promo, pon "".
-- "tallas": lista de strings de tallas si están visibles en la imagen (ej. ["22", "23"]); si no hay tallas visibles, devuelve [].
+- "tallas": lista de strings de las tallas disponibles visibles en los recuadros (ej. si ves "22.0", "23.0", "24.0", "25.0", "26.0", quita el ".0" y devuelve ["22", "23", "24", "25", "26"]; si una talla está tachada con una línea diagonal por estar agotada, NO la incluyas). Si no hay tallas visibles, devuelve [].
+- "box_2d": arreglo de 4 enteros [ymin, xmin, ymax, xmax] en escala de 0 a 1000 que encierran ÚNICAMENTE la fotografía del producto (el zapato, sandalia, tenis, bota o prenda). No incluyas la barra superior de búsqueda ("Buscar producto por ID"), ni el icono de compartir, ni el texto de "usuarios están viendo este producto", ni los puntos del carrusel, ni los textos de abajo. Si en la imagen NO aparece la foto del producto (solo texto), devuelve [].
 ¡REGLA DE ORO!: NUNCA tomes el valor de 'Al público' ni números de pagos semanales (CrediPrice). El costo de compra activo es SIEMPRE el precio de promoción ('Promo M' o 'Exclusivo Online'); si no existe ninguno de estos dos, toma 'Socio'.
 ''';
 
-      final imageBytes = await pickedFile.readAsBytes();
-      final content = [
-        Content.multi([
-          TextPart(catalogPrompt),
-          DataPart('image/jpeg', imageBytes),
-        ]),
-      ];
+    final List<_BatchOfferItem> extractedBatch = [];
 
-      final response = await _callGeminiWithFallback(content);
-      final rawText = response.text ?? '';
+    try {
+      for (int i = 0; i < totalFiles; i++) {
+        if (!mounted) return;
+        if (totalFiles > 1) {
+          setState(() {
+            _scanStatusMessage =
+                'Procesando captura ${i + 1} de $totalFiles con IA...';
+          });
+        }
 
-      if (rawText.isNotEmpty) {
-        final cleanedJson = rawText
-            .replaceAll('```json', '')
-            .replaceAll('```', '')
-            .trim();
-        final decoded = jsonDecode(cleanedJson);
-
-        if (decoded is Map<String, dynamic>) {
-          final double socio = (decoded['precio_socio'] is num)
-              ? (decoded['precio_socio'] as num).toDouble()
-              : (double.tryParse(
-                      decoded['precio_socio']?.toString().replaceAll(',', '') ??
-                          '') ??
-                  0.0);
-
-          final double promo = (decoded['precio_promo'] is num)
-              ? (decoded['precio_promo'] as num).toDouble()
-              : (double.tryParse(
-                      decoded['precio_promo']?.toString().replaceAll(',', '') ??
-                          '') ??
-                  socio);
-
-          final String? tipoRaw = decoded['tipo']?.toString().toLowerCase();
-          final String? catRaw = decoded['categoria']?.toString().toLowerCase();
-          final String? nombreRaw = decoded['nombre_producto']?.toString();
-          final String? marcaRaw = decoded['marca']?.toString();
-
-          // Regla: 50% de ganancia con redondeo hacia arriba al múltiplo de 50 ("máxima ganancia")
-          final double normalCalc = ((socio * 1.5) / 50.0).ceil() * 50.0;
-          final double promoCalc = ((promo * 1.5) / 50.0).ceil() * 50.0;
-          final double activeCost = promo > 0 ? promo : socio;
-          final double base10 = ((activeCost * 1.5) / 10.0).ceil() * 10.0;
-          final int extraDiff = math.max(0, (promoCalc - base10).round());
-
-          String detectedType = 'Tenis';
-          final nameLower = (nombreRaw ?? '').toLowerCase();
-          final typeLower = (tipoRaw ?? '').toLowerCase();
-          final marcaLower = (marcaRaw ?? '').toLowerCase();
-
-          // Detección o respaldo de marca
-          String detectedBrand = '';
-          if (marcaRaw != null &&
-              marcaRaw.trim().isNotEmpty &&
-              marcaLower != 'null') {
-            detectedBrand = marcaRaw.trim();
-          } else {
-            final commonBrands = [
-              'Goodyear', 'Nike', 'Adidas', 'Puma', 'Pirma', 'Charly', 'Converse', 'Vans',
-              'Reebok', 'Flexi', 'Skechers', 'Under Armour', 'Jordan', 'Fila',
-              'Levis', 'Champion', 'K-Swiss', 'DC', 'Timberland', 'Crocs', 'Panam',
-              'Perry Ellis', 'Discovery', 'SwissBrand', 'Lee', 'Wrangler', 'Aeropostale'
-            ];
-            for (final b in commonBrands) {
-              if (nameLower.contains(b.toLowerCase())) {
-                detectedBrand = b;
-                break;
-              }
-            }
-          }
-          if (typeLower.contains('prenda') ||
-              typeLower.contains('ropa') ||
-              nameLower.contains('blusa') ||
-              nameLower.contains('playera') ||
-              nameLower.contains('pantalon') ||
-              nameLower.contains('sueter') ||
-              nameLower.contains('vestido') ||
-              nameLower.contains('chamarra')) {
-            detectedType = 'Prenda';
-          } else if (typeLower.contains('tenis') ||
-              typeLower.contains('tennis') ||
-              nameLower.contains('tenis') ||
-              nameLower.contains('tennis') ||
-              nameLower.contains('sneaker') ||
-              nameLower.contains('running')) {
-            detectedType = 'Tenis';
-          } else {
-            detectedType = 'Calzado';
-          }
-
-          String detectedCat = 'Dama';
-          if (catRaw != null) {
-            final c = catRaw.trim().toLowerCase();
-            if (c.contains('caballero') || c.contains('hombre')) {
-              detectedCat = 'Caballero';
-            } else if (c.contains('niña') || c.contains('nina')) {
-              detectedCat = 'Niña';
-            } else if (c.contains('niño') ||
-                c.contains('nino') ||
-                c.contains('infantil')) {
-              detectedCat = 'Niño';
-            } else if (c.contains('junior')) {
-              detectedCat = 'Juniors';
-            } else if (c.contains('teen')) {
-              detectedCat = 'Teens';
-            } else if (c.contains('beba')) {
-              detectedCat = 'Beba';
-            } else if (c.contains('bebe') ||
-                c.contains('bebé') ||
-                c.contains('maternal')) {
-              detectedCat = 'Bebé';
-            } else if (c.contains('unisex')) {
-              detectedCat = 'Unisex';
-            } else if (c.contains('dama') || c.contains('mujer')) {
-              detectedCat = 'Dama';
-            }
-          }
-
-          final List<dynamic>? rawSizes = decoded['tallas'] as List<dynamic>?;
-          final List<String> parsedSizes = rawSizes
-                  ?.map((e) => e.toString().trim())
-                  .where((s) => s.isNotEmpty)
-                  .toList() ??
-              [];
-
-          final String? tipoPromoRaw = decoded['tipo_promo']?.toString();
-          String detectedPromoLabel = 'Promo M';
-          if (tipoPromoRaw != null && tipoPromoRaw.trim().isNotEmpty) {
-            final lower = tipoPromoRaw.toLowerCase();
-            if (lower.contains('online') || lower.contains('exclusivo')) {
-              detectedPromoLabel = 'Exclusivo Online';
-            } else if (lower.contains('temporada')) {
-              detectedPromoLabel = 'Dto. Temporada';
-            } else if (lower.contains('promo')) {
-              detectedPromoLabel = 'Promo M';
-            } else {
-              detectedPromoLabel = tipoPromoRaw.trim();
-            }
-          }
-
-          if (mounted) {
-            setState(() {
-              _selectedImage = null; // No guardar la captura como foto de producto
-              _socioPrice = socio;
-              _promoCost = promo;
-              _promoLabel = (promo > 0 && promo != socio) ? detectedPromoLabel : null;
-              _costPrice = promo > 0 ? promo : socio;
-              _costController.text = _costPrice.toStringAsFixed(2);
-              _previousPrice = normalCalc > 0 ? normalCalc : null;
-
-              _selectedExtra = extraDiff;
-              if (_extraOptions.contains(extraDiff)) {
-                _customExtraController.clear();
-              } else {
-                _customExtraController.text =
-                    extraDiff > 0 ? extraDiff.toString() : '';
-              }
-              _extraCompleted = true;
-
-              _selectedProductType = detectedType;
-              _selectedCategory = detectedCat;
-              _selectedBrand = detectedBrand.isNotEmpty ? detectedBrand : null;
-              _brandController.text = _selectedBrand ?? '';
-              if (nombreRaw != null && nombreRaw.trim().isNotEmpty) {
-                _customProductName = nombreRaw.trim();
-              }
-
-              if (parsedSizes.isNotEmpty) {
-                _selectedSizes.clear();
-                _selectedSizes.addAll(parsedSizes);
-                _sizeCompleted = true;
-              }
-
-              _costCompleted = true;
-              _productTypeCompleted = true;
-              _categoryCompleted = true;
-              _photoCompleted = false;
-              _scanStatusMessage =
-                  '¡Catálogo detectado! Oferta calculada con éxito';
-              _isAutoClosing = true;
-            });
-
-            await Future.delayed(const Duration(milliseconds: 900));
+        try {
+          final _BatchOfferItem? item = await _extractSingleCatalogImage(
+            pickedFiles[i],
+            catalogPrompt,
+          );
+          if (item != null) {
+            extractedBatch.add(item);
             if (mounted) {
-              setState(() {
-                _isProcessingAI = false;
-                _isScanningImage = false;
-                _isAutoClosing = false;
-                _activeStep = 6; // Paso de foto
-              });
+              _batchQueue = List<_BatchOfferItem>.from(extractedBatch);
+              _loadBatchItemToState(extractedBatch.length - 1);
+            }
+          }
+        } catch (innerErr) {
+          if (totalFiles == 1) rethrow;
+        }
 
-              // Abre automáticamente la galería para que Sofía elija la foto limpia del calzado
-              await Future.delayed(const Duration(milliseconds: 300));
-              if (mounted) {
-                await _pickPhotoFromGallery();
-                if (mounted && _selectedImage != null) {
-                  setState(() {
-                    _activeStep = 7; // Oferta completada lista para compartir
-                  });
-                }
+        // Pausa preventiva entre capturas para respetar límite gratuito de Gemini (15 RPM)
+        if (i < totalFiles - 1) {
+          await Future.delayed(const Duration(milliseconds: 700));
+        }
+      }
+
+      if (extractedBatch.isNotEmpty && mounted) {
+        setState(() {
+          _batchQueue = extractedBatch;
+        });
+        // Mostrar siempre la primera oferta del lote lista para revisar y compartir
+        _loadBatchItemToState(0);
+
+        setState(() {
+          _scanStatusMessage = extractedBatch.length > 1
+              ? '¡Lote de ${extractedBatch.length} ofertas procesado con éxito!'
+              : (extractedBatch.first.croppedImage != null
+                  ? '¡Foto recortada y datos extraídos con éxito!'
+                  : '¡Catálogo detectado! Oferta calculada con éxito');
+          _isAutoClosing = true;
+        });
+
+        await Future.delayed(const Duration(milliseconds: 850));
+        if (mounted) {
+          setState(() {
+            _isProcessingAI = false;
+            _isScanningImage = false;
+            _isAutoClosing = false;
+            _activeStep = 6;
+          });
+
+          if (extractedBatch.length > 1) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '¡${extractedBatch.length} ofertas listas! Revisa y comparte una por una.',
+                ),
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          } else if (extractedBatch.first.croppedImage == null) {
+            await Future.delayed(const Duration(milliseconds: 300));
+            if (mounted) {
+              await _pickPhotoFromGallery();
+              if (mounted && _selectedImage != null) {
+                setState(() {
+                  _activeStep = 7;
+                });
               }
             }
-            return;
+          }
+
+          // Activación del Asistente de Voz para hablar con Sofía
+          await Future.delayed(const Duration(milliseconds: 400));
+          if (mounted) {
+            _triggerSofiaAssistantGreeting();
           }
         }
+        return;
       }
     } catch (e) {
       if (mounted) {
@@ -1694,6 +2184,8 @@ Reglas estrictas:
       _socioPrice = null;
       _promoCost = null;
       _promoLabel = null;
+      _batchQueue.clear();
+      _currentBatchIndex = 0;
       _spokenText = '';
       _costController.clear();
       _costPrice = 0.0;
@@ -2200,6 +2692,7 @@ Reglas estrictas:
         [_selectedImage!],
         text: shareText,
       );
+      _handlePostShareBatchAdvance();
     } else {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2218,6 +2711,7 @@ Reglas estrictas:
           [_selectedImage!],
           text: shareText,
         );
+        _handlePostShareBatchAdvance();
       }
     }
   }
@@ -2268,6 +2762,8 @@ Reglas estrictas:
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    _buildBatchCarouselBar(),
+                    _buildSofiaAssistantBanner(),
                     _buildCostCard(),
                     const SizedBox(height: 8),
                     _buildExtraProfitCard(),
@@ -2292,6 +2788,602 @@ Reglas estrictas:
                 ),
               ),
             ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // BURBUJA VISUAL DEL ASISTENTE CONVERSACIONAL (SOFÍA)
+  // ---------------------------------------------------------------------------
+  Widget _buildSofiaAssistantBanner() {
+    if (_botDialogText == null || _costPrice <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    final int currentExtra = _selectedExtra ?? 0;
+    final int base10 = _basePriceRoundedTo10.toInt();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFF0FDF4), Color(0xFFF7FEE7)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: const Color(0xFF86EFAC),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF16A34A).withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF16A34A), Color(0xFF22C55E)],
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.face_retouching_natural_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Asistente de Sofía',
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF14532D),
+                        ),
+                      ),
+                      Text(
+                        'Pregunta hablada sobre ganancia extra',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF166534),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: _isBotSpeaking ? 'Pausar voz' : 'Repetir en voz alta',
+                  onPressed: () {
+                    if (_isBotSpeaking) {
+                      _stopBotSpeaking();
+                    } else {
+                      _triggerSofiaAssistantGreeting();
+                    }
+                  },
+                  icon: Icon(
+                    _isBotSpeaking
+                        ? Icons.volume_up_rounded
+                        : Icons.volume_mute_rounded,
+                    color: _isBotSpeaking
+                        ? const Color(0xFF15803D)
+                        : const Color(0xFF4B5563),
+                    size: 24,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFBBF7D0)),
+              ),
+              child: Text(
+                _botDialogText!,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1F2937),
+                  height: 1.35,
+                ),
+              ),
+            ),
+            if (_isListeningToSofiaResponse ||
+                _sofiaSpokenResponse.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCFCE7),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF22C55E),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.mic_rounded,
+                      size: 18,
+                      color: Color(0xFF15803D),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _sofiaSpokenResponse,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF166534),
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ActionChip(
+                  avatar: const Icon(Icons.thumb_up_alt_rounded,
+                      size: 15, color: Color(0xFF15803D)),
+                  label: const Text('Me parece perfecto (+\$50)'),
+                  backgroundColor: currentExtra == 50
+                      ? const Color(0xFFDCFCE7)
+                      : Colors.white,
+                  side: BorderSide(
+                    color: currentExtra == 50
+                        ? const Color(0xFF16A34A)
+                        : const Color(0xFFD1D5DB),
+                    width: currentExtra == 50 ? 1.5 : 1,
+                  ),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: currentExtra == 50
+                        ? const Color(0xFF14532D)
+                        : const Color(0xFF374151),
+                  ),
+                  onPressed: () {
+                    _stopBotSpeaking();
+                    setState(() {
+                      _selectedExtra = 50;
+                      _customExtraController.clear();
+                      _saveCurrentStateToBatchItem();
+                    });
+                    _speakBotDialog(
+                        '¡Excelente Sofía! Queda con 50 pesos de ganancia extra.');
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.edit_rounded,
+                      size: 14, color: Color(0xFF2563EB)),
+                  label: const Text('Cámbialo a \$20'),
+                  backgroundColor: currentExtra == 20
+                      ? const Color(0xFFEFF6FF)
+                      : Colors.white,
+                  side: BorderSide(
+                    color: currentExtra == 20
+                        ? const Color(0xFF3B82F6)
+                        : const Color(0xFFD1D5DB),
+                    width: currentExtra == 20 ? 1.5 : 1,
+                  ),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: currentExtra == 20
+                        ? const Color(0xFF1E40AF)
+                        : const Color(0xFF374151),
+                  ),
+                  onPressed: () {
+                    _stopBotSpeaking();
+                    setState(() {
+                      _selectedExtra = 20;
+                      _customExtraController.clear();
+                      _saveCurrentStateToBatchItem();
+                    });
+                    _speakBotDialog(
+                        'Listo Sofía, cambié la ganancia extra a 20 pesos.');
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.edit_rounded,
+                      size: 14, color: Color(0xFF2563EB)),
+                  label: const Text('Cámbialo a \$30'),
+                  backgroundColor: currentExtra == 30
+                      ? const Color(0xFFEFF6FF)
+                      : Colors.white,
+                  side: BorderSide(
+                    color: currentExtra == 30
+                        ? const Color(0xFF3B82F6)
+                        : const Color(0xFFD1D5DB),
+                    width: currentExtra == 30 ? 1.5 : 1,
+                  ),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: currentExtra == 30
+                        ? const Color(0xFF1E40AF)
+                        : const Color(0xFF374151),
+                  ),
+                  onPressed: () {
+                    _stopBotSpeaking();
+                    setState(() {
+                      _selectedExtra = 30;
+                      _customExtraController.clear();
+                      _saveCurrentStateToBatchItem();
+                    });
+                    _speakBotDialog(
+                        'Listo Sofía, cambié la ganancia extra a 30 pesos.');
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.do_not_disturb_on_outlined,
+                      size: 15, color: Color(0xFFDC2626)),
+                  label: Text('Sin ganancia extra (\$$base10)'),
+                  backgroundColor: currentExtra == 0
+                      ? const Color(0xFFFEE2E2)
+                      : Colors.white,
+                  side: BorderSide(
+                    color: currentExtra == 0
+                        ? const Color(0xFFDC2626)
+                        : const Color(0xFFD1D5DB),
+                    width: currentExtra == 0 ? 1.5 : 1,
+                  ),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: currentExtra == 0
+                        ? const Color(0xFF991B1B)
+                        : const Color(0xFF374151),
+                  ),
+                  onPressed: () {
+                    _stopBotSpeaking();
+                    setState(() {
+                      _selectedExtra = 0;
+                      _customExtraController.clear();
+                      _saveCurrentStateToBatchItem();
+                    });
+                    _speakBotDialog(
+                        'De acuerdo Sofía, queda sin ganancia extra.');
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // CARRUSEL DE REVISIÓN Y ENVÍO 1 A 1 PARA LOTES DE CAPTURAS
+  // ---------------------------------------------------------------------------
+  Widget _buildBatchCarouselBar() {
+    if (_batchQueue.isNotEmpty &&
+        _currentBatchIndex >= 0 &&
+        _currentBatchIndex < _batchQueue.length) {
+      _saveCurrentStateToBatchItem();
+    }
+
+    if (_batchQueue.length <= 1) {
+      if (_costCompleted && _activeStep != 1) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: SizedBox(
+            height: 38,
+            child: OutlinedButton.icon(
+              onPressed: _scanCatalogScreenshot,
+              icon: const Icon(Icons.burst_mode_rounded, size: 18),
+              label: const Text(
+                'Escanear 1 o varias capturas (Lote)',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF1B873F),
+                backgroundColor: Colors.white,
+                side: const BorderSide(color: Color(0xFF25D366)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+      return const SizedBox.shrink();
+    }
+
+    final int total = _batchQueue.length;
+    final int sharedCount = _batchQueue.where((e) => e.isShared).length;
+    final _BatchOfferItem currentItem = _batchQueue[_currentBatchIndex];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: _SectionCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.collections_bookmark_rounded,
+                  size: 19,
+                  color: Color(0xFF1B873F),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Lote: Oferta ${_currentBatchIndex + 1} de $total',
+                    style: const TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF18181B),
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: sharedCount == total
+                        ? const Color(0xFFE0F5E9)
+                        : const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$sharedCount/$total enviadas',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: sharedCount == total
+                          ? const Color(0xFF0A2E16)
+                          : const Color(0xFF2563EB),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: _scanCatalogScreenshot,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF4F2ED),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.add_photo_alternate_outlined,
+                          size: 15,
+                          color: Color(0xFF18181B),
+                        ),
+                        SizedBox(width: 3),
+                        Text(
+                          'Nuevo',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF18181B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 64,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: total,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, idx) {
+                  final item = _batchQueue[idx];
+                  final bool isCurrent = idx == _currentBatchIndex;
+                  final String label = (item.brand != null &&
+                          item.brand!.trim().isNotEmpty)
+                      ? item.brand!
+                      : item.productType;
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _goToBatchItem(idx),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: 125,
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: isCurrent
+                            ? const Color(0xFFF0FDF4)
+                            : const Color(0xFFF4F4F5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isCurrent
+                              ? const Color(0xFF1DB954)
+                              : (item.isShared
+                                  ? const Color(0xFF86EFAC)
+                                  : Colors.transparent),
+                          width: isCurrent ? 2 : 1.2,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: item.croppedImage != null
+                                  ? Image.file(
+                                      File(item.croppedImage!.path),
+                                      fit: BoxFit.contain,
+                                    )
+                                  : const Icon(
+                                      Icons.shopping_bag_outlined,
+                                      size: 20,
+                                      color: Color(0xFF71717A),
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '#${idx + 1} $label',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF3F3F46),
+                                        ),
+                                      ),
+                                    ),
+                                    if (item.isShared)
+                                      const Icon(
+                                        Icons.check_circle,
+                                        size: 13,
+                                        color: Color(0xFF1DB954),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '\$${item.finalPrice.toInt()}',
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: isCurrent
+                                        ? const Color(0xFF0A2E16)
+                                        : const Color(0xFF18181B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 34,
+                    child: OutlinedButton.icon(
+                      onPressed: _currentBatchIndex > 0
+                          ? () => _goToBatchItem(_currentBatchIndex - 1)
+                          : null,
+                      icon: const Icon(Icons.chevron_left_rounded, size: 18),
+                      label: const Text(
+                        'Anterior',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        side: const BorderSide(color: Color(0xFFD4D4D8)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text(
+                    currentItem.isShared ? '✓ Ya enviada' : 'Pendiente',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: currentItem.isShared
+                          ? const Color(0xFF1B873F)
+                          : const Color(0xFF71717A),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: SizedBox(
+                    height: 34,
+                    child: OutlinedButton.icon(
+                      onPressed: _currentBatchIndex < total - 1
+                          ? () => _goToBatchItem(_currentBatchIndex + 1)
+                          : null,
+                      icon: const Icon(Icons.chevron_right_rounded, size: 18),
+                      label: const Text(
+                        'Siguiente',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        side: const BorderSide(color: Color(0xFFD4D4D8)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -3347,7 +4439,7 @@ Reglas estrictas:
                     onPressed: _scanCatalogScreenshot,
                     icon: const Icon(Icons.document_scanner_outlined, size: 18),
                     label: const Text(
-                      'Escanear captura de Price Shoes',
+                      'Escanear 1 o varias capturas (Price Shoes)',
                       style:
                           TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                     ),
@@ -4270,7 +5362,7 @@ Reglas estrictas:
   }
 
   // ---------------------------------------------------------------------------
-  // 6. FOTO DEL PRODUCTO (Solo Galería)
+  // 6. FOTO DEL PRODUCTO (Recorte automático IA o Galería)
   // ---------------------------------------------------------------------------
   Widget _buildPhotoCard() {
     final bool isExpanded = _activeStep == 6;
@@ -4284,7 +5376,7 @@ Reglas estrictas:
             onTap: () => setState(() => _activeStep = isExpanded ? 0 : 6),
             child: Row(
               children: [
-                if (_photoCompleted && !isExpanded) ...[
+                if (_photoCompleted) ...[
                   const Icon(
                     Icons.check_circle,
                     color: Color(0xFF1DB954),
@@ -4302,6 +5394,27 @@ Reglas estrictas:
                     ),
                   ),
                 ),
+                if (_selectedImage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE0F5E9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      'Lista',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0A2E16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 if (_selectedImage != null && !isExpanded)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
@@ -4309,7 +5422,7 @@ Reglas estrictas:
                       File(_selectedImage!.path),
                       width: 30,
                       height: 30,
-                      fit: BoxFit.cover,
+                      fit: BoxFit.contain,
                     ),
                   ),
                 const SizedBox(width: 4),
@@ -4330,13 +5443,22 @@ Reglas estrictas:
               children: [
                 const SizedBox(height: 10),
                 if (_selectedImage != null) ...[
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      File(_selectedImage!.path),
-                      height: 140,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
+                  Container(
+                    height: 155,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE4E4E7)),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(
+                        File(_selectedImage!.path),
+                        height: 155,
+                        width: double.infinity,
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -4354,9 +5476,11 @@ Reglas estrictas:
                       ),
                     ),
                     icon: const Icon(Icons.photo_library_outlined, size: 18),
-                    label: const Text(
-                      'Elegir de galería',
-                      style: TextStyle(
+                    label: Text(
+                      _selectedImage != null
+                          ? 'Cambiar foto de galería'
+                          : 'Elegir de galería',
+                      style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                       ),
@@ -4578,6 +5702,15 @@ Reglas estrictas:
   // BOTÓN DE ACCIÓN ("Compartir en Estado")
   // ---------------------------------------------------------------------------
   Widget _buildShareButton() {
+    final bool isBatchMode = _batchQueue.length > 1;
+    final bool hasNextInBatch =
+        isBatchMode && _currentBatchIndex < _batchQueue.length - 1;
+    final String buttonText = isBatchMode
+        ? (hasNextInBatch
+            ? 'Compartir (${_currentBatchIndex + 1}/${_batchQueue.length}) y Siguiente'
+            : 'Compartir última oferta (${_currentBatchIndex + 1}/${_batchQueue.length})')
+        : 'Compartir en Estado';
+
     return SizedBox(
       width: double.infinity,
       height: 52,
@@ -4590,10 +5723,10 @@ Reglas estrictas:
           shape: const StadiumBorder(),
         ),
         icon: const Icon(Icons.chat_outlined, size: 20),
-        label: const Text(
-          'Compartir en Estado',
-          style: TextStyle(
-            fontSize: 16.5,
+        label: Text(
+          buttonText,
+          style: const TextStyle(
+            fontSize: 16,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -4625,6 +5758,43 @@ Reglas estrictas:
         ),
       ),
     );
+  }
+}
+
+class _BatchOfferItem {
+  double socioPrice;
+  double promoCost;
+  String? promoLabel;
+  double costPrice;
+  double? previousPrice;
+  int? selectedExtra;
+  String productType;
+  String category;
+  String? brand;
+  String? customProductName;
+  List<String> sizes;
+  XFile? croppedImage;
+  bool isShared = false;
+
+  _BatchOfferItem({
+    required this.socioPrice,
+    required this.promoCost,
+    required this.promoLabel,
+    required this.costPrice,
+    required this.previousPrice,
+    required this.selectedExtra,
+    required this.productType,
+    required this.category,
+    required this.brand,
+    required this.customProductName,
+    required this.sizes,
+    required this.croppedImage,
+  });
+
+  double get finalPrice {
+    if (costPrice <= 0) return 0.0;
+    final double base10 = ((costPrice * 1.5) / 10.0).ceil() * 10.0;
+    return base10 + (selectedExtra ?? 0);
   }
 }
 
