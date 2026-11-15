@@ -32,9 +32,9 @@ class CalculadoraOfertasApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFFAF9F5),
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF25D366),
+          seedColor: const Color(0xFF0F2B5C),
           surface: Colors.white,
         ),
         fontFamily: 'Roboto',
@@ -368,12 +368,12 @@ Reglas:
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDCFCE7),
+                    color: const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(
                     Icons.face_retouching_natural_rounded,
-                    color: Color(0xFF15803D),
+                    color: Color(0xFF0F2B5C),
                     size: 26,
                   ),
                 ),
@@ -387,7 +387,7 @@ Reglas:
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF14532D),
+                          color: Color(0xFF0F2B5C),
                         ),
                       ),
                       Text(
@@ -434,7 +434,7 @@ Reglas:
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
                       borderSide: const BorderSide(
-                        color: Color(0xFF16A34A),
+                        color: Color(0xFF0F2B5C),
                         width: 1.8,
                       ),
                     ),
@@ -463,7 +463,7 @@ Reglas:
                 ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF16A34A),
+                  backgroundColor: const Color(0xFF0F2B5C),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -2370,7 +2370,7 @@ Reglas estrictas:
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: const Color(0xFF1B873F),
+        backgroundColor: const Color(0xFF0F2B5C),
         content: Text(
           'Listo: $_generatedOfferMessage',
         ),
@@ -3097,9 +3097,9 @@ Reglas estrictas:
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF0FDF4),
+                        color: const Color(0xFFEFF6FF),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFBBF7D0)),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -3107,7 +3107,7 @@ Reglas estrictas:
                           const Icon(
                             Icons.face_retouching_natural_rounded,
                             size: 14,
-                            color: Color(0xFF15803D),
+                            color: Color(0xFF0F2B5C),
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -3115,11 +3115,11 @@ Reglas estrictas:
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF15803D),
+                              color: Color(0xFF0F2B5C),
                             ),
                           ),
                           const SizedBox(width: 2),
-                          const Icon(Icons.edit, size: 11, color: Color(0xFF16A34A)),
+                          const Icon(Icons.edit, size: 11, color: Color(0xFF1D4ED8)),
                         ],
                       ),
                     ),
@@ -3188,18 +3188,18 @@ Reglas estrictas:
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFFF0FDF4), Color(0xFFF7FEE7)],
+            colors: [Color(0xFFF0F7FF), Color(0xFFE0EFFF)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: const Color(0xFF86EFAC),
+            color: const Color(0xFF93C5FD),
             width: 1.5,
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF16A34A).withValues(alpha: 0.08),
+              color: const Color(0xFF0F2B5C).withValues(alpha: 0.08),
               blurRadius: 10,
               offset: const Offset(0, 3),
             ),
@@ -3216,7 +3216,7 @@ Reglas estrictas:
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
-                      colors: [Color(0xFF16A34A), Color(0xFF22C55E)],
+                      colors: [Color(0xFF0F2B5C), Color(0xFF1E3A8A)],
                     ),
                   ),
                   child: const Icon(
@@ -3241,14 +3241,14 @@ Reglas estrictas:
                               style: const TextStyle(
                                 fontSize: 14.5,
                                 fontWeight: FontWeight.w800,
-                                color: Color(0xFF14532D),
+                                color: Color(0xFF0F2B5C),
                               ),
                             ),
                             const SizedBox(width: 4),
                             const Icon(
                               Icons.edit,
                               size: 12,
-                              color: Color(0xFF16A34A),
+                              color: Color(0xFF1D4ED8),
                             ),
                           ],
                         ),
@@ -3258,7 +3258,7 @@ Reglas estrictas:
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFF166534),
+                          color: Color(0xFF1E3A8A),
                         ),
                       ),
                     ],
@@ -3280,7 +3280,7 @@ Reglas estrictas:
                         ? Icons.mic_rounded
                         : Icons.mic_none_rounded,
                     color: _isListeningToSofiaResponse
-                        ? const Color(0xFF16A34A)
+                        ? const Color(0xFF1D4ED8)
                         : const Color(0xFF4B5563),
                     size: 24,
                   ),
@@ -3299,7 +3299,7 @@ Reglas estrictas:
                         ? Icons.volume_up_rounded
                         : Icons.volume_mute_rounded,
                     color: _isBotSpeaking
-                        ? const Color(0xFF15803D)
+                        ? const Color(0xFF0F2B5C)
                         : const Color(0xFF4B5563),
                     size: 24,
                   ),
@@ -3312,7 +3312,7 @@ Reglas estrictas:
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
+                border: Border.all(color: const Color(0xFFBFDBFE)),
               ),
               child: Text(
                 _botDialogText!,
@@ -3329,10 +3329,10 @@ Reglas estrictas:
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFDCFCE7),
+                  color: const Color(0xFFEFF6FF),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: const Color(0xFF22C55E),
+                    color: const Color(0xFF3B82F6),
                     width: 1.2,
                   ),
                 ),
@@ -3341,7 +3341,7 @@ Reglas estrictas:
                     const Icon(
                       Icons.mic_rounded,
                       size: 18,
-                      color: Color(0xFF15803D),
+                      color: Color(0xFF1D4ED8),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -3352,7 +3352,7 @@ Reglas estrictas:
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF166534),
+                          color: Color(0xFF0F2B5C),
                           fontStyle: FontStyle.italic,
                         ),
                       ),
@@ -3368,14 +3368,14 @@ Reglas estrictas:
               children: [
                 ActionChip(
                   avatar: const Icon(Icons.thumb_up_alt_rounded,
-                      size: 15, color: Color(0xFF15803D)),
+                      size: 15, color: Color(0xFF0F2B5C)),
                   label: const Text('Me parece perfecto (+\$50)'),
                   backgroundColor: currentExtra == 50
-                      ? const Color(0xFFDCFCE7)
+                      ? const Color(0xFFDBEAFE)
                       : Colors.white,
                   side: BorderSide(
                     color: currentExtra == 50
-                        ? const Color(0xFF16A34A)
+                        ? const Color(0xFF1D4ED8)
                         : const Color(0xFFD1D5DB),
                     width: currentExtra == 50 ? 1.5 : 1,
                   ),
@@ -3383,7 +3383,7 @@ Reglas estrictas:
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: currentExtra == 50
-                        ? const Color(0xFF14532D)
+                        ? const Color(0xFF0F2B5C)
                         : const Color(0xFF374151),
                   ),
                   onPressed: () {
@@ -3492,17 +3492,17 @@ Reglas estrictas:
                 ),
                 ActionChip(
                   avatar: const Icon(Icons.share_rounded,
-                      size: 15, color: Color(0xFF15803D)),
+                      size: 15, color: Color(0xFF0F2B5C)),
                   label: const Text('📲 Compártelo en WhatsApp'),
-                  backgroundColor: const Color(0xFFDCFCE7),
+                  backgroundColor: const Color(0xFFEFF6FF),
                   side: const BorderSide(
-                    color: Color(0xFF16A34A),
+                    color: Color(0xFF1E3A8A),
                     width: 1.5,
                   ),
                   labelStyle: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF14532D),
+                    color: Color(0xFF0F2B5C),
                   ),
                   onPressed: () {
                     _stopBotSpeaking();
@@ -3541,9 +3541,9 @@ Reglas estrictas:
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               ),
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF1B873F),
+                foregroundColor: const Color(0xFF0F2B5C),
                 backgroundColor: Colors.white,
-                side: const BorderSide(color: Color(0xFF25D366)),
+                side: const BorderSide(color: Color(0xFF1E3A8A), width: 1.4),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -3570,7 +3570,7 @@ Reglas estrictas:
                 const Icon(
                   Icons.collections_bookmark_rounded,
                   size: 19,
-                  color: Color(0xFF1B873F),
+                  color: Color(0xFF0F2B5C),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -3590,7 +3590,7 @@ Reglas estrictas:
                   ),
                   decoration: BoxDecoration(
                     color: sharedCount == total
-                        ? const Color(0xFFE0F5E9)
+                        ? const Color(0xFFEFF6FF)
                         : const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -3600,7 +3600,7 @@ Reglas estrictas:
                       fontSize: 11.5,
                       fontWeight: FontWeight.w800,
                       color: sharedCount == total
-                          ? const Color(0xFF0A2E16)
+                          ? const Color(0xFF0F2B5C)
                           : const Color(0xFF2563EB),
                     ),
                   ),
@@ -3665,14 +3665,14 @@ Reglas estrictas:
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
                         color: isCurrent
-                            ? const Color(0xFFF0FDF4)
+                            ? const Color(0xFFEFF6FF)
                             : const Color(0xFFF4F4F5),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: isCurrent
-                              ? const Color(0xFF1DB954)
+                              ? const Color(0xFF1E3A8A)
                               : (item.isShared
-                                  ? const Color(0xFF86EFAC)
+                                  ? const Color(0xFF93C5FD)
                                   : Colors.transparent),
                           width: isCurrent ? 2 : 1.2,
                         ),
@@ -3724,7 +3724,7 @@ Reglas estrictas:
                                       const Icon(
                                         Icons.check_circle,
                                         size: 13,
-                                        color: Color(0xFF1DB954),
+                                        color: Color(0xFF1E3A8A),
                                       ),
                                   ],
                                 ),
@@ -3735,7 +3735,7 @@ Reglas estrictas:
                                     fontSize: 13.5,
                                     fontWeight: FontWeight.w900,
                                     color: isCurrent
-                                        ? const Color(0xFF0A2E16)
+                                        ? const Color(0xFF0F2B5C)
                                         : const Color(0xFF18181B),
                                   ),
                                 ),
@@ -3785,7 +3785,7 @@ Reglas estrictas:
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       color: currentItem.isShared
-                          ? const Color(0xFF1B873F)
+                          ? const Color(0xFF0F2B5C)
                           : const Color(0xFF71717A),
                     ),
                   ),
@@ -3879,9 +3879,9 @@ Reglas estrictas:
           duration: const Duration(milliseconds: 250),
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
           decoration: BoxDecoration(
-            color: const Color(0xFFE8F5E9),
+            color: const Color(0xFFEFF6FF),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFA5D6A7), width: 1),
+            border: Border.all(color: const Color(0xFFBFDBFE), width: 1),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -3889,7 +3889,7 @@ Reglas estrictas:
               const Icon(
                 Icons.bolt_rounded,
                 size: 15,
-                color: Color(0xFF1B873F),
+                color: Color(0xFF0F2B5C),
               ),
               const SizedBox(width: 2),
               Text(
@@ -3897,7 +3897,7 @@ Reglas estrictas:
                 style: const TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF1B873F),
+                  color: Color(0xFF0F2B5C),
                 ),
               ),
             ],
@@ -3914,7 +3914,7 @@ Reglas estrictas:
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
-            Icon(Icons.bolt_rounded, color: Color(0xFF1B873F), size: 26),
+            Icon(Icons.bolt_rounded, color: Color(0xFF0F2B5C), size: 26),
             SizedBox(width: 8),
             Text(
               'Cuota Gratis de IA',
@@ -3950,7 +3950,7 @@ Reglas estrictas:
                         '$_todayAiRequestsUsed de $_dailyFreeRequestsLimit',
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF1B873F),
+                          color: Color(0xFF0F2B5C),
                         ),
                       ),
                     ],
@@ -3967,7 +3967,7 @@ Reglas estrictas:
                         '$_remainingAiRequests libres',
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF1B873F),
+                          color: Color(0xFF0F2B5C),
                         ),
                       ),
                     ],
@@ -4001,7 +4001,7 @@ Reglas estrictas:
                         '\$0.00 MXN',
                         style: TextStyle(
                           fontWeight: FontWeight.w900,
-                          color: Color(0xFF1B873F),
+                          color: Color(0xFF0F2B5C),
                         ),
                       ),
                     ],
@@ -4023,7 +4023,7 @@ Reglas estrictas:
               '¡Entendido!',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
-                color: Color(0xFF1B873F),
+                color: Color(0xFF0F2B5C),
               ),
             ),
           ),
@@ -4082,12 +4082,12 @@ Reglas estrictas:
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E9),
+                          color: const Color(0xFFEFF6FF),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: const Icon(
                           Icons.history_rounded,
-                          color: Color(0xFF1B873F),
+                          color: Color(0xFF0F2B5C),
                           size: 22,
                         ),
                       ),
@@ -4302,7 +4302,7 @@ Reglas estrictas:
                                                   style: const TextStyle(
                                                     fontSize: 17,
                                                     fontWeight: FontWeight.w900,
-                                                    color: Color(0xFF16A34A),
+                                                    color: Color(0xFF0F2B5C),
                                                   ),
                                                 ),
                                                 const SizedBox(width: 8),
@@ -4314,7 +4314,7 @@ Reglas estrictas:
                                                   ),
                                                   decoration: BoxDecoration(
                                                     color:
-                                                        const Color(0xFFE8F5E9),
+                                                        const Color(0xFFEFF6FF),
                                                     borderRadius:
                                                         BorderRadius.circular(6),
                                                   ),
@@ -4324,7 +4324,7 @@ Reglas estrictas:
                                                       fontSize: 11,
                                                       fontWeight:
                                                           FontWeight.w700,
-                                                      color: Color(0xFF1B873F),
+                                                      color: Color(0xFF0F2B5C),
                                                     ),
                                                   ),
                                                 ),
@@ -4365,7 +4365,7 @@ Reglas estrictas:
                                                 _shareHistoryItem(item),
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor:
-                                                  const Color(0xFF25D366),
+                                                  const Color(0xFF0F2B5C),
                                               foregroundColor: Colors.white,
                                               elevation: 0,
                                               shape: RoundedRectangleBorder(
@@ -4438,7 +4438,7 @@ Reglas estrictas:
 
     return SizedBox.expand(
       child: Container(
-        color: const Color(0xFF030D06), // Fondo 100% inmersivo sin huecos ni recuadros
+        color: const Color(0xFF020B1A), // Fondo azul noche inmersivo
         child: SafeArea(
               child: Column(
                 children: [
@@ -4456,12 +4456,12 @@ Reglas estrictas:
                               height: 9,
                               decoration: BoxDecoration(
                                 color: _isAutoClosing
-                                    ? const Color(0xFF00FF7F)
-                                    : const Color(0xFF25D366),
+                                    ? const Color(0xFF38BDF8)
+                                    : const Color(0xFF3B82F6),
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: const Color(0xFF00FF7F)
+                                    color: const Color(0xFF38BDF8)
                                         .withValues(alpha: 0.9),
                                     blurRadius: 8,
                                   ),
@@ -4478,7 +4478,7 @@ Reglas estrictas:
                                           ? 'Afinando detalles...'
                                           : 'Escuchando en vivo...')),
                               style: const TextStyle(
-                                color: Color(0xFF00FF7F),
+                                color: Color(0xFF38BDF8),
                                 fontSize: 14.5,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 0.4,
@@ -4538,7 +4538,7 @@ Reglas estrictas:
                                 color: Colors.black.withValues(alpha: 0.28),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: const Color(0xFF00FF7F).withValues(
+                                    color: const Color(0xFF38BDF8).withValues(
                                       alpha: (_isAutoClosing ? 0.9 : 0.45) +
                                           _spasmIntensity * 0.4,
                                     ),
@@ -4587,7 +4587,7 @@ Reglas estrictas:
                         shadows: [
                           Shadow(
                             color:
-                                const Color(0xFF00FF7F).withValues(alpha: 0.4),
+                                const Color(0xFF38BDF8).withValues(alpha: 0.4),
                             blurRadius: 10,
                           ),
                         ],
@@ -4597,17 +4597,17 @@ Reglas estrictas:
 
                   const SizedBox(height: 22),
 
-                  // LISTA QUE MUESTRA LO DETECTADO Y LO QUE FALTA (FROSTED EMERALD SIN MARCOS BLANCOS)
+                  // LISTA QUE MUESTRA LO DETECTADO Y LO QUE FALTA (FROSTED NAVY)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 18, vertical: 14),
                       decoration: BoxDecoration(
-                        color: const Color(0xCC061C0E),
+                        color: const Color(0xCC091E42),
                         borderRadius: BorderRadius.circular(22),
                         border: Border.all(
-                          color: const Color(0xFF114D28),
+                          color: const Color(0xFF1E3A8A),
                           width: 1.5,
                         ),
                         boxShadow: [
@@ -4628,7 +4628,7 @@ Reglas estrictas:
                             pendingText: 'Falta: Costo (ej. cuesta 800)',
                             icon: Icons.attach_money_rounded,
                           ),
-                          const Divider(color: Color(0xFF114D28), height: 16),
+                          const Divider(color: Color(0xFF1E3A8A), height: 16),
                           _buildRequirementRow(
                             isComplete: hasTypeAndCat,
                             completeText: productCatText,
@@ -4636,7 +4636,7 @@ Reglas estrictas:
                                 'Falta: ¿Zapato o Ropa? ¿Dama, Caballero o Niño?',
                             icon: Icons.checkroom_rounded,
                           ),
-                          const Divider(color: Color(0xFF114D28), height: 16),
+                          const Divider(color: Color(0xFF1E3A8A), height: 16),
                           _buildRequirementRow(
                             isComplete: hasSizes,
                             completeText: 'Tallas: $_sizesFormatted',
@@ -4645,7 +4645,7 @@ Reglas estrictas:
                             icon: Icons.straighten_rounded,
                             isOptional: _isScanningImage,
                           ),
-                          const Divider(color: Color(0xFF114D28), height: 16),
+                          const Divider(color: Color(0xFF1E3A8A), height: 16),
                           _buildRequirementRow(
                             isComplete: _selectedImage != null || hasExtra,
                             completeText: _selectedImage != null
@@ -4691,7 +4691,7 @@ Reglas estrictas:
                   : Icons.radio_button_unchecked_rounded),
           size: 19,
           color: isComplete
-              ? const Color(0xFF00FF7F)
+              ? const Color(0xFF38BDF8)
               : (isOptional ? Colors.white38 : Colors.white60),
         ),
         const SizedBox(width: 10),
@@ -4729,7 +4729,7 @@ Reglas estrictas:
                 if (_costCompleted && !isExpanded) ...[
                   const Icon(
                     Icons.check_circle,
-                    color: Color(0xFF1DB954),
+                    color: Color(0xFF0F2B5C),
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -4751,7 +4751,7 @@ Reglas estrictas:
                   ),
                   decoration: BoxDecoration(
                     color: _costCompleted && !isExpanded
-                        ? const Color(0xFFE0F5E9)
+                        ? const Color(0xFFEFF6FF)
                         : const Color(0xFFEFECE6),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -4761,7 +4761,7 @@ Reglas estrictas:
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: _costCompleted && !isExpanded
-                          ? const Color(0xFF0A2E16)
+                          ? const Color(0xFF0F2B5C)
                           : const Color(0xFF4A4A4A),
                     ),
                   ),
@@ -4880,8 +4880,8 @@ Reglas estrictas:
                           TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                     ),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF1B873F),
-                      side: const BorderSide(color: Color(0xFF25D366)),
+                      foregroundColor: const Color(0xFF0F2B5C),
+                      side: const BorderSide(color: Color(0xFF1E3A8A)),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -4921,7 +4921,7 @@ Reglas estrictas:
                 if (_extraCompleted && !isExpanded) ...[
                   const Icon(
                     Icons.check_circle,
-                    color: Color(0xFF1DB954),
+                    color: Color(0xFF0F2B5C),
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -4943,7 +4943,7 @@ Reglas estrictas:
                   ),
                   decoration: BoxDecoration(
                     color: _selectedExtra != null && _selectedExtra! > 0
-                        ? const Color(0xFFE0F5E9)
+                        ? const Color(0xFFEFF6FF)
                         : const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -4955,7 +4955,7 @@ Reglas estrictas:
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
                       color: _selectedExtra != null && _selectedExtra! > 0
-                          ? const Color(0xFF0A2E16)
+                          ? const Color(0xFF0F2B5C)
                           : const Color(0xFF2563EB),
                     ),
                   ),
@@ -5220,7 +5220,7 @@ Reglas estrictas:
                 if (_productTypeCompleted && !isExpanded) ...[
                   const Icon(
                     Icons.check_circle,
-                    color: Color(0xFF1DB954),
+                    color: Color(0xFF0F2B5C),
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -5242,7 +5242,7 @@ Reglas estrictas:
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE0F5E9),
+                        color: const Color(0xFFEFF6FF),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -5252,7 +5252,7 @@ Reglas estrictas:
                         style: const TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0A2E16),
+                          color: Color(0xFF0F2B5C),
                         ),
                       ),
                     ),
@@ -5493,7 +5493,7 @@ Reglas estrictas:
                 if (_categoryCompleted && !isExpanded) ...[
                   const Icon(
                     Icons.check_circle,
-                    color: Color(0xFF1DB954),
+                    color: Color(0xFF0F2B5C),
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -5515,7 +5515,7 @@ Reglas estrictas:
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE0F5E9),
+                      color: const Color(0xFFEFF6FF),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -5523,7 +5523,7 @@ Reglas estrictas:
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF0A2E16),
+                        color: Color(0xFF0F2B5C),
                       ),
                     ),
                   ),
@@ -5617,7 +5617,7 @@ Reglas estrictas:
                 if (_sizeCompleted && !isExpanded) ...[
                   const Icon(
                     Icons.check_circle,
-                    color: Color(0xFF1DB954),
+                    color: Color(0xFF0F2B5C),
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -5640,7 +5640,7 @@ Reglas estrictas:
                     ),
                     decoration: BoxDecoration(
                       color: hasSizes
-                          ? const Color(0xFFE0F5E9)
+                          ? const Color(0xFFEFF6FF)
                           : const Color(0xFFEFECE6),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -5651,7 +5651,7 @@ Reglas estrictas:
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
                         color: hasSizes
-                            ? const Color(0xFF0A2E16)
+                            ? const Color(0xFF0F2B5C)
                             : const Color(0xFF52525B),
                       ),
                     ),
@@ -5815,7 +5815,7 @@ Reglas estrictas:
                 if (_photoCompleted) ...[
                   const Icon(
                     Icons.check_circle,
-                    color: Color(0xFF1DB954),
+                    color: Color(0xFF0F2B5C),
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -5837,7 +5837,7 @@ Reglas estrictas:
                       vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE0F5E9),
+                      color: const Color(0xFFEFF6FF),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Text(
@@ -5845,7 +5845,7 @@ Reglas estrictas:
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF0A2E16),
+                        color: Color(0xFF0F2B5C),
                       ),
                     ),
                   ),
@@ -6007,17 +6007,19 @@ Reglas estrictas:
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: hasPrev
-                      ? const Color(0xFF63FF83)
-                      : const Color(0xFFE8F5E9),
+                  color: const Color(0xFFEFF6FF),
                   borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: const Color(0xFFBFDBFE),
+                    width: 1,
+                  ),
                 ),
                 child: Text(
                   hasPrev ? (_promoLabel ?? 'Promo M') : 'Sugerido',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0A2E16),
+                    color: Color(0xFF0F2B5C),
                   ),
                 ),
               ),
@@ -6153,12 +6155,12 @@ Reglas estrictas:
       child: ElevatedButton.icon(
         onPressed: _shareOnWhatsAppStatus,
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF25D366),
+          backgroundColor: const Color(0xFF0F2B5C),
           foregroundColor: Colors.white,
           elevation: 2,
           shape: const StadiumBorder(),
         ),
-        icon: const Icon(Icons.chat_outlined, size: 20),
+        icon: const Icon(Icons.share_rounded, size: 20),
         label: Text(
           buttonText,
           style: const TextStyle(
@@ -6351,16 +6353,16 @@ class PlasmaOrbPainter extends CustomPainter {
         ? 0.0
         : (math.sin(animationValue * 24 * math.pi) * 2.0 * spasmIntensity);
 
-    // 1. AURA EXTERIOR SUAVE Y DIFUMINADA (Brillo esmeralda relajante)
+    // 1. AURA EXTERIOR SUAVE Y DIFUMINADA (Brillo azul eléctrico y relajante)
     final double auraRadius = baseR * 1.45 + calmBreathe + (subtleSpasm * 12.0);
     final Paint auraPaint = Paint()
       ..shader = RadialGradient(
         colors: [
-          (isComplete ? const Color(0xFF00FF7F) : const Color(0xFF00FF88))
+          (isComplete ? const Color(0xFF38BDF8) : const Color(0xFF60A5FA))
               .withValues(alpha: (0.35 + subtleSpasm * 0.25).clamp(0.0, 1.0)),
-          const Color(0xFF00E676)
+          const Color(0xFF2563EB)
               .withValues(alpha: (0.12 + subtleSpasm * 0.1).clamp(0.0, 1.0)),
-          const Color(0xFF003318).withValues(alpha: 0.0),
+          const Color(0xFF020B1A).withValues(alpha: 0.0),
         ],
         stops: const [0.0, 0.55, 1.0],
       ).createShader(Rect.fromCircle(center: center, radius: auraRadius));
@@ -6375,7 +6377,7 @@ class PlasmaOrbPainter extends CustomPainter {
       final Paint wavePaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.4
-        ..color = const Color(0xFF00FF7F)
+        ..color = const Color(0xFF38BDF8)
             .withValues(alpha: waveAlpha.clamp(0.0, 1.0));
       canvas.drawCircle(center, waveRadius, wavePaint);
     }
@@ -6390,7 +6392,7 @@ class PlasmaOrbPainter extends CustomPainter {
       baseAmplitude: 2.0,
       spasmExtra: subtleSpasm * 4.5,
       jitter: spasmJitter,
-      color: const Color(0xFF00FF88),
+      color: const Color(0xFF60A5FA),
       alpha: 0.65 + subtleSpasm * 0.2,
       strokeWidth: 2.0,
     );
@@ -6404,7 +6406,7 @@ class PlasmaOrbPainter extends CustomPainter {
       baseAmplitude: 1.5,
       spasmExtra: subtleSpasm * 3.5,
       jitter: -spasmJitter * 0.6,
-      color: const Color(0xFF69F0AE),
+      color: const Color(0xFF93C5FD),
       alpha: 0.75,
       strokeWidth: 1.8,
     );
@@ -6424,9 +6426,9 @@ class PlasmaOrbPainter extends CustomPainter {
       ..shader = RadialGradient(
         colors: [
           Colors.white,
-          const Color(0xFFE8FFF3),
-          const Color(0xFF00FF7F).withValues(alpha: 0.8),
-          const Color(0xFF00E676).withValues(alpha: 0.0),
+          const Color(0xFFEFF6FF),
+          const Color(0xFF38BDF8).withValues(alpha: 0.8),
+          const Color(0xFF2563EB).withValues(alpha: 0.0),
         ],
         stops: const [0.0, 0.4, 0.75, 1.0],
       ).createShader(Rect.fromCircle(center: center, radius: coreR));
@@ -6566,7 +6568,7 @@ class PlasmaOrbPainter extends CustomPainter {
               .clamp(0.1, 0.7);
 
       final Paint pPaint = Paint()
-        ..color = const Color(0xFF00FF7F).withValues(alpha: pAlpha);
+        ..color = const Color(0xFF38BDF8).withValues(alpha: pAlpha);
       canvas.drawCircle(Offset(px, py), pSize, pPaint);
     }
   }
