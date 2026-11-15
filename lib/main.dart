@@ -170,7 +170,8 @@ Reglas:
   List<_BatchOfferItem> _batchQueue = [];
   int _currentBatchIndex = 0;
 
-  // Variables para Asistente Conversacional Interactivo (Sofía)
+  // Variables para Asistente Conversacional Interactivo
+  String _userName = 'Sofía';
   late final FlutterTts _tts;
   bool _isBotSpeaking = false;
   bool _isListeningToSofiaResponse = false;
@@ -324,6 +325,184 @@ Reglas:
       final String encoded =
           jsonEncode(_historyItems.map((e) => e.toJson()).toList());
       await prefs.setString('saved_offers_history', encoded);
+    } catch (_) {}
+  }
+
+  Future<void> _loadUserName() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('user_name');
+      if (saved != null && saved.trim().isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _userName = saved.trim();
+          });
+        }
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showNameInputDialog(isFirstTime: true);
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _showNameInputDialog({bool isFirstTime = false}) async {
+    final TextEditingController nameController =
+        TextEditingController(text: isFirstTime ? '' : _userName);
+
+    await showDialog(
+      context: context,
+      barrierDismissible: !isFirstTime,
+      builder: (ctx) {
+        return PopScope(
+          canPop: !isFirstTime,
+          child: AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCFCE7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.face_retouching_natural_rounded,
+                    color: Color(0xFF15803D),
+                    size: 26,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isFirstTime ? '¡Bienvenida/o!' : 'Cambiar tu nombre',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF14532D),
+                        ),
+                      ),
+                      Text(
+                        isFirstTime ? '¿Cómo te llamas?' : 'Tu nombre para la IA',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF4B5563),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Elige tu nombre para que tu asistente inteligente te hable y te salude directamente a ti:',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: Color(0xFF374151),
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: InputDecoration(
+                    hintText: 'Ej. Sofía, Lupita, María...',
+                    prefixIcon: const Icon(Icons.person_outline_rounded),
+                    filled: true,
+                    fillColor: const Color(0xFFF9FAFB),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF16A34A),
+                        width: 1.8,
+                      ),
+                    ),
+                  ),
+                  onSubmitted: (val) {
+                    final clean = val.trim();
+                    if (clean.isNotEmpty) {
+                      _saveUserName(clean);
+                      Navigator.of(ctx).pop();
+                    }
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              if (!isFirstTime)
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text(
+                    'Cancelar',
+                    style: TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF16A34A),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
+                ),
+                onPressed: () {
+                  final clean = nameController.text.trim();
+                  _saveUserName(clean.isNotEmpty ? clean : 'Sofía');
+                  Navigator.of(ctx).pop();
+                },
+                child: Text(
+                  isFirstTime ? 'Comenzar' : 'Guardar',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _saveUserName(String name) async {
+    setState(() {
+      _userName = name;
+      if (_botDialogText != null && _costPrice > 0) {
+        _botDialogText = _buildSofiaDialogText();
+      }
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', name);
     } catch (_) {}
   }
 
@@ -520,6 +699,7 @@ Reglas:
     _initTts();
     _loadDailyUsage();
     _loadHistory();
+    _loadUserName();
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3200),
@@ -640,7 +820,7 @@ Reglas:
         ? 'Su precio anterior es de $prevPrice pesos. '
         : '';
 
-    return '¡Hola Sofía! Terminé el escaneo. Extraje unos $title$sizesText. '
+    return '¡Hola $_userName! Terminé el escaneo. Extraje unos $title$sizesText. '
         '${prevPart}El precio base sin ganancia extra es de $base10Price pesos, '
         'y tengo la idea de agregarle esta ganancia extra de $extraPesos pesos para que quede en $finalPriceTotal pesos. '
         '¿Te parece perfecto, o gustas cambiarlo a uno diferente? Y si ya te gusta solo dime "compártelo" para abrir WhatsApp.';
@@ -667,7 +847,7 @@ Reglas:
       _isExecutingVoiceAction = false;
       setState(() {
         _isListeningToSofiaResponse = true;
-        _sofiaSpokenResponse = 'Te escucho Sofía...';
+        _sofiaSpokenResponse = 'Te escucho $_userName...';
       });
 
       await _speech.listen(
@@ -714,7 +894,7 @@ Reglas:
         _isListeningToSofiaResponse = false;
         _saveCurrentStateToBatchItem();
       });
-      _speakBotDialog('¡Abriendo WhatsApp para tu Estado, Sofía!', autoListenAfter: false);
+      _speakBotDialog('¡Abriendo WhatsApp para tu Estado, $_userName!', autoListenAfter: false);
       Future.delayed(const Duration(milliseconds: 900), () {
         if (mounted) {
           _shareOnWhatsAppStatus();
@@ -744,7 +924,7 @@ Reglas:
         _saveCurrentStateToBatchItem();
       });
       _speakBotDialog(
-          '¡Excelente Sofía! Quedó con 50 pesos de ganancia extra. Dime "compártelo" cuando quieras abrir WhatsApp.',
+          '¡Excelente $_userName! Quedó con 50 pesos de ganancia extra. Dime "compártelo" cuando quieras abrir WhatsApp.',
           autoListenAfter: true);
       return;
     }
@@ -767,7 +947,7 @@ Reglas:
         _saveCurrentStateToBatchItem();
       });
       _speakBotDialog(
-          'Entendido Sofía, se queda sin ganancia extra, a ${_basePriceRoundedTo10.toInt()} pesos. Dime "compártelo" para abrir WhatsApp.',
+          'Entendido $_userName, se queda sin ganancia extra, a ${_basePriceRoundedTo10.toInt()} pesos. Dime "compártelo" para abrir WhatsApp.',
           autoListenAfter: true);
       return;
     }
@@ -787,7 +967,7 @@ Reglas:
       });
       final int newTotal = _basePriceRoundedTo10.toInt() + amount;
       _speakBotDialog(
-          'Listo Sofía, cambié la ganancia extra a $amount pesos. Total: $newTotal pesos. Dime "compártelo" para abrir WhatsApp.',
+          'Listo $_userName, cambié la ganancia extra a $amount pesos. Total: $newTotal pesos. Dime "compártelo" para abrir WhatsApp.',
           autoListenAfter: true);
       return;
     }
@@ -826,12 +1006,12 @@ Reglas:
     final String brandText = _selectedBrand ?? 'No detectada';
 
     final String knowledgePrompt = '''
-Eres el asistente personal inteligente y cariñoso de Sofía, quien vende calzado y ropa por catálogo de Price Shoes en México.
-Responde directamente a la pregunta o comentario de Sofía en un máximo de 2 oraciones, de forma natural, cálida y útil.
+Eres el asistente personal inteligente y cariñoso de $_userName, quien vende calzado y ropa por catálogo de Price Shoes en México.
+Responde directamente a la pregunta o comentario de $_userName en un máximo de 2 oraciones, de forma natural, cálida y útil.
 IMPORTANTE: Responde en texto plano conversacional normal, NUNCA uses formato JSON, NUNCA uses corchetes, comillas ni llaves {}. Solo lo que se diría en voz alta a una persona mayor.
 Al final recuérdale con cariño que si le gusta puede decir "compártelo" para abrir WhatsApp, o pedir cambiar la ganancia extra.
 
-Contexto del producto actual que Sofía está revisando:
+Contexto del producto actual que $_userName está revisando:
 - Artículo: $productLabel de $category
 - Marca: $brandText
 - Tallas disponibles: $sizesText
@@ -839,9 +1019,9 @@ Contexto del producto actual que Sofía está revisando:
 - Precio base sin extra (con su 50% de ganancia): \$$base10Price
 - Ganancia extra actual: +\$$extraPesos
 - Precio final de venta al público: \$$finalPriceTotal
-- Ganancia total estimada de Sofía: \$${_totalProfit.toInt()}
+- Ganancia total estimada de $_userName: \$${_totalProfit.toInt()}
 
-Pregunta de Sofía: "$userQuestion"
+Pregunta de $_userName: "$userQuestion"
 ''';
 
     try {
@@ -860,7 +1040,7 @@ Pregunta de Sofía: "$userQuestion"
     } catch (_) {
       if (mounted) {
         _speakBotDialog(
-          'Te escuché Sofía. Si quieres cambiar la ganancia solo dime la cantidad o dime "compártelo" para abrir WhatsApp.',
+          'Te escuché $_userName. Si quieres cambiar la ganancia solo dime la cantidad o dime "compártelo" para abrir WhatsApp.',
           autoListenAfter: true,
         );
       }
@@ -2908,6 +3088,43 @@ Reglas estrictas:
                       ),
                     ),
                   ),
+                  InkWell(
+                    onTap: () => _showNameInputDialog(isFirstTime: false),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFBBF7D0)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.face_retouching_natural_rounded,
+                            size: 14,
+                            color: Color(0xFF15803D),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _userName,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF15803D),
+                            ),
+                          ),
+                          const SizedBox(width: 2),
+                          const Icon(Icons.edit, size: 11, color: Color(0xFF16A34A)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
                   _buildAppBarHistoryButton(),
                   const SizedBox(width: 6),
                   _buildAppBarQuotaChip(),
@@ -3009,19 +3226,34 @@ Reglas estrictas:
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Asistente de Sofía',
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF14532D),
+                      InkWell(
+                        onTap: () => _showNameInputDialog(isFirstTime: false),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Asistente de $_userName',
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF14532D),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.edit,
+                              size: 12,
+                              color: Color(0xFF16A34A),
+                            ),
+                          ],
                         ),
                       ),
-                      Text(
+                      const Text(
                         'Pregunta hablada sobre ganancia extra',
                         style: TextStyle(
                           fontSize: 11.5,
@@ -3115,7 +3347,7 @@ Reglas estrictas:
                     Expanded(
                       child: Text(
                         _sofiaSpokenResponse.isEmpty
-                            ? 'Te escucho Sofía...'
+                            ? 'Te escucho $_userName...'
                             : _sofiaSpokenResponse,
                         style: const TextStyle(
                           fontSize: 13,
@@ -3162,7 +3394,7 @@ Reglas estrictas:
                       _saveCurrentStateToBatchItem();
                     });
                     _speakBotDialog(
-                        '¡Excelente Sofía! Queda con 50 pesos de ganancia extra.');
+                        '¡Excelente $_userName! Queda con 50 pesos de ganancia extra.');
                   },
                 ),
                 ActionChip(
@@ -3193,7 +3425,7 @@ Reglas estrictas:
                       _saveCurrentStateToBatchItem();
                     });
                     _speakBotDialog(
-                        'Listo Sofía, cambié la ganancia extra a 20 pesos.');
+                        'Listo $_userName, cambié la ganancia extra a 20 pesos.');
                   },
                 ),
                 ActionChip(
@@ -3224,7 +3456,7 @@ Reglas estrictas:
                       _saveCurrentStateToBatchItem();
                     });
                     _speakBotDialog(
-                        'Listo Sofía, cambié la ganancia extra a 30 pesos.');
+                        'Listo $_userName, cambié la ganancia extra a 30 pesos.');
                   },
                 ),
                 ActionChip(
@@ -3255,7 +3487,7 @@ Reglas estrictas:
                       _saveCurrentStateToBatchItem();
                     });
                     _speakBotDialog(
-                        'De acuerdo Sofía, queda sin ganancia extra.');
+                        'De acuerdo $_userName, queda sin ganancia extra.');
                   },
                 ),
                 ActionChip(
@@ -3758,14 +3990,14 @@ Reglas estrictas:
                     ],
                   ),
                   const Divider(height: 16),
-                  const Row(
+                  Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Costo para Sofía:',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+                        'Costo para $_userName:',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      Text(
+                      const Text(
                         '\$0.00 MXN',
                         style: TextStyle(
                           fontWeight: FontWeight.w900,
