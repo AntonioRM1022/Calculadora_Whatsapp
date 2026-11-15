@@ -174,6 +174,7 @@ Reglas:
   late final FlutterTts _tts;
   bool _isBotSpeaking = false;
   bool _isListeningToSofiaResponse = false;
+  bool _autoListenAfterCurrentSpeech = false;
   String _sofiaSpokenResponse = '';
   String? _botDialogText;
 
@@ -538,7 +539,12 @@ Reglas:
       _tts.setCompletionHandler(() {
         if (mounted) {
           setState(() => _isBotSpeaking = false);
-          _listenToSofiaResponse();
+          if (_autoListenAfterCurrentSpeech) {
+            _autoListenAfterCurrentSpeech = false;
+            Future.delayed(const Duration(milliseconds: 500), () {
+              if (mounted) _listenToSofiaResponse();
+            });
+          }
         }
       });
 
@@ -552,18 +558,58 @@ Reglas:
     } catch (_) {}
   }
 
-  Future<void> _speakBotDialog(String text) async {
+  String _cleanTextForSpeech(String raw) {
+    String text = raw.trim();
+    if (text.startsWith('{') || text.contains('"respuesta"') || text.contains('respuesta:')) {
+      try {
+        final decoded = jsonDecode(text);
+        if (decoded is Map && decoded.containsKey('respuesta')) {
+          text = decoded['respuesta'].toString();
+        }
+      } catch (_) {
+        final RegExp resRegex = RegExp(
+          r'"?respuesta"?\s*:\s*"?([^"\}]+)"?',
+          caseSensitive: false,
+        );
+        final match = resRegex.firstMatch(text);
+        if (match != null && match.group(1) != null) {
+          text = match.group(1)!;
+        }
+      }
+    }
+    return text
+        .replaceAll('```json', '')
+        .replaceAll('```', '')
+        .replaceAll('{', '')
+        .replaceAll('}', '')
+        .replaceAll('[', '')
+        .replaceAll(']', '')
+        .replaceAll('"', '')
+        .replaceAll('\\', '')
+        .replaceAll('*', '')
+        .replaceAll('#', '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  Future<void> _speakBotDialog(
+    String text, {
+    bool autoListenAfter = false,
+  }) async {
+    _autoListenAfterCurrentSpeech = autoListenAfter;
+    final String cleanText = _cleanTextForSpeech(text);
     try {
       await _speech.stop();
       if (_isListeningToSofiaResponse) {
         setState(() => _isListeningToSofiaResponse = false);
       }
       await _tts.stop();
-      await _tts.speak(text);
+      await _tts.speak(cleanText);
     } catch (_) {}
   }
 
   Future<void> _stopBotSpeaking() async {
+    _autoListenAfterCurrentSpeech = false;
     try {
       await _tts.stop();
       if (mounted) setState(() => _isBotSpeaking = false);
@@ -600,7 +646,7 @@ Reglas:
       _botDialogText = dialog;
       _sofiaSpokenResponse = '';
     });
-    await _speakBotDialog(dialog);
+    await _speakBotDialog(dialog, autoListenAfter: true);
   }
 
   Future<void> _listenToSofiaResponse() async {
@@ -623,9 +669,7 @@ Reglas:
           setState(() {
             _sofiaSpokenResponse = words;
           });
-          if (result.finalResult || words.isNotEmpty) {
-            _processSofiaVoiceCommand(words);
-          }
+          _processSofiaVoiceCommand(words, isFinal: result.finalResult);
         },
         listenOptions: stt.SpeechListenOptions(
           listenFor: const Duration(seconds: 14),
@@ -640,7 +684,7 @@ Reglas:
     }
   }
 
-  void _processSofiaVoiceCommand(String rawSpeech) {
+  void _processSofiaVoiceCommand(String rawSpeech, {required bool isFinal}) {
     final lower = rawSpeech.toLowerCase().trim();
     if (lower.isEmpty) return;
 
@@ -660,8 +704,8 @@ Reglas:
         _isListeningToSofiaResponse = false;
         _saveCurrentStateToBatchItem();
       });
-      _speakBotDialog('¡Abriendo WhatsApp para tu Estado, Sofía!');
-      Future.delayed(const Duration(milliseconds: 1400), () {
+      _speakBotDialog('¡Abriendo WhatsApp para tu Estado, Sofía!', autoListenAfter: false);
+      Future.delayed(const Duration(milliseconds: 1300), () {
         if (mounted) {
           _shareOnWhatsAppStatus();
         }
@@ -689,7 +733,8 @@ Reglas:
         _saveCurrentStateToBatchItem();
       });
       _speakBotDialog(
-          '¡Excelente Sofía! Quedó con 50 pesos de ganancia extra. Dime "compártelo" cuando quieras abrir WhatsApp.');
+          '¡Excelente Sofía! Quedó con 50 pesos de ganancia extra. Dime "compártelo" cuando quieras abrir WhatsApp.',
+          autoListenAfter: true);
       return;
     }
 
@@ -710,7 +755,8 @@ Reglas:
         _saveCurrentStateToBatchItem();
       });
       _speakBotDialog(
-          'Entendido Sofía, se queda sin ganancia extra, a ${_basePriceRoundedTo10.toInt()} pesos. Dime "compártelo" para abrir WhatsApp.');
+          'Entendido Sofía, se queda sin ganancia extra, a ${_basePriceRoundedTo10.toInt()} pesos. Dime "compártelo" para abrir WhatsApp.',
+          autoListenAfter: true);
       return;
     }
 
@@ -728,28 +774,27 @@ Reglas:
       });
       final int newTotal = _basePriceRoundedTo10.toInt() + amount;
       _speakBotDialog(
-          'Listo Sofía, cambié la ganancia extra a $amount pesos. Total: $newTotal pesos. Dime "compártelo" para abrir WhatsApp.');
+          'Listo Sofía, cambié la ganancia extra a $amount pesos. Total: $newTotal pesos. Dime "compártelo" para abrir WhatsApp.',
+          autoListenAfter: true);
       return;
     }
 
-    // 5. Preguntas sobre el producto o la tienda (Base de conocimiento interactiva con Gemini)
-    if (lower.length > 5 &&
-        !lower.contains('repite') &&
-        !lower.contains('otra vez')) {
-      _speech.stop();
-      setState(() {
-        _isListeningToSofiaResponse = false;
-      });
-      _answerSofiaQuestionWithKnowledge(rawSpeech);
-      return;
-    }
-
-    // 6. Si pide repetir
+    // 5. Si pide repetir
     if (lower.contains('repite') ||
         lower.contains('otra vez') ||
         lower.contains('no escuché') ||
         lower.contains('no escuche')) {
       _triggerSofiaAssistantGreeting();
+      return;
+    }
+
+    // 6. Base de conocimiento: ÚNICAMENTE cuando isFinal es verdadero (terminó de hablar)
+    if (isFinal && lower.length > 3) {
+      _speech.stop();
+      setState(() {
+        _isListeningToSofiaResponse = false;
+      });
+      _answerSofiaQuestionWithKnowledge(rawSpeech);
       return;
     }
   }
@@ -768,7 +813,8 @@ Reglas:
     final String knowledgePrompt = '''
 Eres el asistente personal inteligente y cariñoso de Sofía, quien vende calzado y ropa por catálogo de Price Shoes en México.
 Responde directamente a la pregunta o comentario de Sofía en un máximo de 2 oraciones, de forma natural, cálida y útil.
-Al final recuérdale que si gusta puede decir "compártelo" para abrir WhatsApp, o pedir cambiar la ganancia extra.
+IMPORTANTE: Responde en texto plano conversacional normal, NUNCA uses formato JSON, NUNCA uses corchetes, comillas ni llaves {}. Solo lo que se diría en voz alta a una persona mayor.
+Al final recuérdale con cariño que si le gusta puede decir "compártelo" para abrir WhatsApp, o pedir cambiar la ganancia extra.
 
 Contexto del producto actual que Sofía está revisando:
 - Artículo: $productLabel de $category
@@ -784,20 +830,24 @@ Pregunta de Sofía: "$userQuestion"
 ''';
 
     try {
-      final response = await _callGeminiWithFallback([
-        Content.text(knowledgePrompt),
-      ]);
-      final String? answer = response.text?.trim();
-      if (answer != null && answer.isNotEmpty && mounted) {
+      final response = await _callGeminiWithFallback(
+        [Content.text(knowledgePrompt)],
+        jsonMode: false,
+      );
+      final rawAnswer = response.text?.trim() ?? '';
+      final String cleanAnswer = _cleanTextForSpeech(rawAnswer);
+      if (cleanAnswer.isNotEmpty && mounted) {
         setState(() {
-          _botDialogText = answer;
+          _botDialogText = cleanAnswer;
         });
-        await _speakBotDialog(answer);
+        await _speakBotDialog(cleanAnswer, autoListenAfter: true);
       }
     } catch (_) {
       if (mounted) {
         _speakBotDialog(
-            'Te escuché Sofía. Si quieres cambiar la ganancia solo dime la cantidad o dime "compártelo" para abrir WhatsApp.');
+          'Te escuché Sofía. Si quieres cambiar la ganancia solo dime la cantidad o dime "compártelo" para abrir WhatsApp.',
+          autoListenAfter: true,
+        );
       }
     }
   }
@@ -1078,8 +1128,9 @@ Pregunta de Sofía: "$userQuestion"
   ];
 
   Future<GenerateContentResponse> _callGeminiWithFallback(
-    List<Content> content,
-  ) async {
+    List<Content> content, {
+    bool jsonMode = true,
+  }) async {
     Object? lastError;
     for (final modelName in _geminiModelCandidates) {
       try {
@@ -1087,8 +1138,8 @@ Pregunta de Sofía: "$userQuestion"
           model: modelName,
           apiKey: _geminiApiKey,
           generationConfig: GenerationConfig(
-            responseMimeType: 'application/json',
-            temperature: 0.1,
+            responseMimeType: jsonMode ? 'application/json' : 'text/plain',
+            temperature: jsonMode ? 0.1 : 0.4,
           ),
         );
         final response = await model.generateContent(content);
@@ -2957,6 +3008,27 @@ Reglas estrictas:
                   ),
                 ),
                 IconButton(
+                  tooltip: _isListeningToSofiaResponse ? 'Escuchando...' : 'Hablarle al asistente',
+                  onPressed: () {
+                    if (_isListeningToSofiaResponse) {
+                      _speech.stop();
+                      setState(() => _isListeningToSofiaResponse = false);
+                    } else {
+                      _stopBotSpeaking();
+                      _listenToSofiaResponse();
+                    }
+                  },
+                  icon: Icon(
+                    _isListeningToSofiaResponse
+                        ? Icons.mic_rounded
+                        : Icons.mic_none_rounded,
+                    color: _isListeningToSofiaResponse
+                        ? const Color(0xFF16A34A)
+                        : const Color(0xFF4B5563),
+                    size: 24,
+                  ),
+                ),
+                IconButton(
                   tooltip: _isBotSpeaking ? 'Pausar voz' : 'Repetir en voz alta',
                   onPressed: () {
                     if (_isBotSpeaking) {
@@ -2995,8 +3067,7 @@ Reglas estrictas:
                 ),
               ),
             ),
-            if (_isListeningToSofiaResponse ||
-                _sofiaSpokenResponse.isNotEmpty) ...[
+            if (_isListeningToSofiaResponse) ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -3018,7 +3089,9 @@ Reglas estrictas:
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _sofiaSpokenResponse,
+                        _sofiaSpokenResponse.isEmpty
+                            ? 'Te escucho Sofía...'
+                            : _sofiaSpokenResponse,
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
